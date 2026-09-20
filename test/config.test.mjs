@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseYaml } from '../src/config/yaml.mjs';
 import { deepMerge, orderedTiers, tierAbove, workerForTier, isLoopback } from '../src/config/load.mjs';
+import { PROVIDERS } from '../src/router/providers.mjs';
 import { testConfig } from './helpers.mjs';
 
 test('yaml: nested mappings, sequences and inline mappings', () => {
@@ -106,4 +107,16 @@ test('fixed-<tier> and jev aliases resolve to canonical routers', () => {
   assert.equal(testConfig({ routing: { mode: 'fixed-high' } }).routing.fixedTier, 'high');
   assert.equal(testConfig({ routing: { mode: 'fixed-high' } }).routing.mode, 'fixed');
   assert.equal(testConfig({ routing: { mode: 'jev' } }).routing.mode, 'jev-direct');
+});
+
+test('the suite is not swayed by the developer\'s own config or keys', () => {
+  // `testConfig` used to read ~/.jev-dispatch/config.yaml. A real one repointed
+  // a dozen tests at another provider, and the key a test plants is honoured
+  // only for the provider it expects — so the substituted provider's live key
+  // was read from the environment and printed in the failure output.
+  assert.equal(testConfig().routing.jev.provider, 'typesafe');
+  assert.equal(testConfig().routing.jev.accountId, null);
+  for (const provider of Object.values(PROVIDERS)) {
+    assert.equal(process.env[provider.apiKeyEnv], undefined, `${provider.apiKeyEnv} must not leak in`);
+  }
 });
