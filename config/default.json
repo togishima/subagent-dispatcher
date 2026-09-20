@@ -1,0 +1,102 @@
+{
+  "$comment": "Default jev-dispatch configuration. Copy to ~/.jev-dispatch/config.json (or .yaml) and edit. Every value here is overridable; user config is deep-merged over this.",
+
+  "routing": {
+    "mode": "policy-graph",
+    "fixedTier": "high",
+    "fallbackTierOnRouterError": "medium",
+
+    "policyGraph": {
+      "path": "policies/v1.json",
+      "defaultMinConfidence": 0.6,
+      "overRouteOnUncertain": true,
+      "onEvaluatorUnavailable": "safer-branch",
+      "maxTraversalSteps": 32
+    },
+
+    "jevDirect": {
+      "confidencePolicy": {
+        "enabled": true,
+        "minMaxProbability": 0.6,
+        "floorTier": "medium"
+      }
+    },
+
+    "jev": {
+      "endpoint": "https://api.typesafe.ai/v1/systemone",
+      "model": "jev-latest",
+      "apiKeyEnv": "TYPESAFE_API_KEY",
+      "timeoutMs": 8000,
+      "maxRetries": 3
+    }
+  },
+
+  "tiers": {
+    "low":    { "order": 1, "worker": "haiku",  "description": "Mechanical and local: the work is obvious, single-step, or pure lookup/formatting. Any fast small model does it just as well." },
+    "medium": { "order": 2, "worker": "sonnet", "description": "Ordinary engineering: a few dependent steps using familiar patterns, little ambiguity, a competent mid-tier model is enough." },
+    "high":   { "order": 3, "worker": "opus",   "description": "Hard or high-stakes: cross-cutting design, subtle debugging, interacting constraints, or correctness matters more than cost." }
+  },
+
+  "workers": {
+    "haiku":  { "kind": "claude-agent", "model": "haiku",  "agent": "low-worker",    "maxTurns": 20, "frontier": false },
+    "sonnet": { "kind": "claude-agent", "model": "sonnet", "agent": "medium-worker", "maxTurns": 30, "frontier": false },
+    "opus":   { "kind": "claude-agent", "model": "opus",   "agent": "high-worker",   "maxTurns": 40, "frontier": true }
+  },
+
+  "workerDefaults": {
+    "permissionMode": "acceptEdits",
+    "bare": false,
+    "strictMcpConfig": true,
+    "timeoutMs": 900000,
+    "allowedTools": [],
+    "disallowedTools": ["Task", "Agent", "mcp__jev-dispatch__delegate"],
+    "extraArgs": [],
+    "passEnv": [
+      "PATH", "HOME", "LANG", "LC_ALL", "TERM", "SHELL", "USER", "LOGNAME", "TMPDIR",
+      "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+      "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_MODEL", "AWS_REGION",
+      "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+      "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+      "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+      "GIT_CONFIG_GLOBAL", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"
+    ]
+  },
+
+  "escalation": {
+    "enabled": true,
+    "maxAttemptsPerTask": 3,
+    "escalateOn": ["CAPABILITY_FAILURE"],
+    "retrySameTierOn": ["ENVIRONMENT_FAILURE"],
+    "maxSameTierRetries": 1,
+    "uncertainCountsAsPass": true
+  },
+
+  "verification": {
+    "enabled": true,
+    "timeoutMs": 300000,
+    "allowInlineCommands": false,
+    "checks": []
+  },
+
+  "contract": {
+    "sessionStartNudge": true
+  },
+
+  "telemetry": {
+    "dbPath": null,
+    "retentionDays": 100,
+    "storeTitles": true,
+    "titleMaxLength": 80,
+    "debugStoreRawInput": false
+  },
+
+  "ui": {
+    "host": "127.0.0.1",
+    "port": 4319,
+    "autoStart": false
+  },
+
+  "otel": {
+    "receiverEnabled": true
+  }
+}

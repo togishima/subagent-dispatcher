@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jev-dispatch": {
+      "command": "node",
+      "args": ["--experimental-sqlite", "${CLAUDE_PLUGIN_ROOT}/src/mcp/server.mjs"],
+      "timeout": 1800000,
+      "env": {
+        "JEV_DISPATCH_DATA_DIR": "${CLAUDE_PLUGIN_DATA}",
+        "JEV_DISPATCH_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "jev-dispatch",
+  "displayName": "Jev Dispatch",
+  "version": "0.1.0",
+  "description": "Routes delegated subtasks to cheap/normal/frontier workers via Jev capability tiers, with verification, escalation and local experiment telemetry.",
+  "author": { "name": "togishima" },
+  "repository": "https://github.com/togishima/subagent-dispatcher",
+  "license": "MIT",
+  "keywords": ["routing", "subagents", "telemetry", "jev", "cost"]
+}
