@@ -7,15 +7,17 @@
  * and whether the answer arrives wrapped in an envelope.
  *
  * A provider is therefore a handful of values, not a plugin system. Every one of
- * them is overridable from configuration, which matters because none of these
- * shapes has been exercised against a running service. The TypeSafe shape was
- * read from a working client; the gateway shapes are inferred from how those
- * gateways generally behave. `jev-dispatch check-router` makes one real request
- * and prints the response, which is how a provider gets confirmed.
+ * them is overridable from configuration, which matters because most of these
+ * shapes have not been exercised against a running service. The Cloudflare shape
+ * has; the TypeSafe shape was read from a working client; the remaining gateway
+ * shapes are inferred from how those gateways generally behave. `jev-dispatch
+ * check-router` makes one real request and prints the response, which is how a
+ * provider gets confirmed.
  */
 
 /** How much is actually known about a provider's shape. */
 export const SOURCE = {
+  CONFIRMED: 'exercised against the running service',
   CLIENT: 'read from a working client, not exercised against the service',
   INFERRED: 'inferred from how this gateway generally behaves — confirm it',
 };
@@ -73,17 +75,17 @@ export const PROVIDERS = {
   },
 
   /**
-   * Cloudflare Workers AI. The model is named in the path rather than the body,
-   * and results come back under `result` alongside `success` and `errors`.
+   * Cloudflare Workers AI. The model is named in the body beside an `input`
+   * wrapper, and the answers come back nested two levels under `result`,
+   * alongside `success` and `errors`. Confirmed against the running service.
    */
   cloudflare: {
     label: 'Cloudflare Workers AI',
-    endpoint: 'https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/run/{model}',
+    endpoint: 'https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/run',
     apiKeyEnv: 'CLOUDFLARE_API_TOKEN',
     headers: bearer,
-    body: ({ state, questions }) => ({ state, questions }),
-    modelInPath: true,
-    source: SOURCE.INFERRED,
+    body: ({ state, questions, model }) => ({ model, input: { state, questions } }),
+    source: SOURCE.CONFIRMED,
   },
 
   /** Vercel AI Gateway, which proxies to the upstream provider. */

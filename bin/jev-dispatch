@@ -9,7 +9,7 @@ import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
 import { predicateNames } from '../src/policy/predicates.mjs';
 import { applicableChecks } from '../src/verify/index.mjs';
 import { probeProvider } from '../src/router/jev-client.mjs';
-import { PROVIDERS as PROVIDERS_FOR_HELP, resolveProvider, providerNames } from '../src/router/providers.mjs';
+import { PROVIDERS as PROVIDERS_FOR_HELP, SOURCE, resolveProvider, providerNames } from '../src/router/providers.mjs';
 import { resolveApiKey } from '../src/config/plugin-options.mjs';
 import { createEngine, engineNames, selectedEngineName } from '../src/router/engines/index.mjs';
 import { overview, policyComparison, exportForPolicyAuthoring } from '../src/telemetry/queries.mjs';
@@ -124,7 +124,8 @@ async function doctor() {
   try {
     provider = resolveProvider(config.routing.jev);
     ok(`provider ${provider.name}`, provider.endpoint);
-    warn('shape', `${provider.source}; run "jev-dispatch check-router" to confirm`);
+    if (provider.source === SOURCE.CONFIRMED) ok('shape', provider.source);
+    else warn('shape', `${provider.source}; run "jev-dispatch check-router" to confirm`);
   } catch (error) {
     bad('provider', error.message);
   }

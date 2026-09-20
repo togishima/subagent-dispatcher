@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PROVIDERS, providerNames, renderEndpoint, resolveProvider, unwrapPayload, describeUnknownPayload,
+  PROVIDERS, SOURCE, providerNames, renderEndpoint, resolveProvider, unwrapPayload, describeUnknownPayload,
 } from '../src/router/providers.mjs';
 import { evaluateSemanticPredicates } from '../src/router/jev-client.mjs';
 import { testConfig } from './helpers.mjs';
@@ -27,8 +27,8 @@ test('every shipped provider declares what is actually known about its shape', (
   for (const [name, provider] of Object.entries(PROVIDERS)) {
     assert.ok(provider.label, `${name} needs a label`);
     assert.ok(provider.apiKeyEnv, `${name} needs a key env var`);
-    // No provider claims to be confirmed, because none has been.
-    assert.match(provider.source, /not exercised against the service|confirm it/);
+    // A provider says which of the three it is; it cannot invent a fourth.
+    assert.ok(Object.values(SOURCE).includes(provider.source), `${name} has an unknown source`);
   }
 });
 
@@ -39,15 +39,15 @@ test('the default provider is TypeSafe, and needs no extra configuration', () =>
   assert.equal(provider.apiKeyEnv, 'TYPESAFE_API_KEY');
 });
 
-test('Cloudflare puts the model in the path, and keeps its slash', () => {
-  const provider = resolveProvider(jev({ provider: 'cloudflare', accountId: 'acc123', model: '@typesafe/jev-1.13.0' }));
-  // Percent-encoding the slash would address a different route entirely.
-  assert.equal(provider.endpoint, 'https://api.cloudflare.com/client/v4/accounts/acc123/ai/run/@typesafe/jev-1.13.0');
+test('Cloudflare names the model in the body, wrapped in `input`', () => {
+  const provider = resolveProvider(jev({ provider: 'cloudflare', accountId: 'acc123', model: 'typesafe/jev' }));
+  // The model is not a path segment: /ai/run/{model} answers "No route for that URI".
+  assert.equal(provider.endpoint, 'https://api.cloudflare.com/client/v4/accounts/acc123/ai/run');
   assert.equal(provider.apiKeyEnv, 'CLOUDFLARE_API_TOKEN');
-  // The model is named once, in the URL — not repeated in the body.
-  const body = provider.buildBody({ state: {}, questions: {}, model: '@typesafe/jev-1.13.0' });
-  assert.equal(body.model, undefined);
-  assert.deepEqual(Object.keys(body).sort(), ['questions', 'state']);
+  const body = provider.buildBody({ state: { s: 1 }, questions: { q: {} }, model: 'typesafe/jev' });
+  assert.equal(body.model, 'typesafe/jev');
+  assert.deepEqual(Object.keys(body).sort(), ['input', 'model']);
+  assert.deepEqual(body.input, { state: { s: 1 }, questions: { q: {} } });
 });
 
 test('a placeholder with nothing to fill it is reported, not sent', () => {
@@ -123,11 +123,11 @@ test('an answer inside a gateway envelope is parsed like a bare one', async () =
   process.env.CLOUDFLARE_API_TOKEN = 'cf-key';
   const stub = stubFetch(() => ({ result: ANSWERS, success: true, errors: [] }));
   try {
-    const config = jev({ provider: 'cloudflare', accountId: 'acc', model: '@typesafe/jev-1.13.0' });
+    const config = jev({ provider: 'cloudflare', accountId: 'acc', model: 'typesafe/jev' });
     const result = await evaluateSemanticPredicates([{ id: 'q', question: 'q?' }], { subtask: 'x' }, config);
     assert.equal(result.answers.q.result, 'yes');
     assert.equal(result.answers.q.probability, 0.8);
-    assert.equal(stub.calls[0].url, 'https://api.cloudflare.com/client/v4/accounts/acc/ai/run/@typesafe/jev-1.13.0');
+    assert.equal(stub.calls[0].url, 'https://api.cloudflare.com/client/v4/accounts/acc/ai/run');
     assert.equal(stub.calls[0].headers.Authorization, 'Bearer cf-key');
   } finally { stub.restore(); }
 });
