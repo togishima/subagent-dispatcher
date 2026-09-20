@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildClaudeArgs, workerEnv, extractUsage, verificationPermissions } from '../src/worker/run.mjs';
+import { buildClaudeArgs, workerEnv, extractUsage, resultEvent, verificationPermissions } from '../src/worker/run.mjs';
 import { parseAgentFile, inlineAgentSpec } from '../src/worker/agent-defs.mjs';
 import { normalizeWorkerOutput, buildWorkerPrompt } from '../src/worker/contract.mjs';
 import { snapshotWorktree, diffSnapshots, resolveChangedFiles } from '../src/worker/changed-files.mjs';
@@ -235,4 +235,24 @@ test('outside a repository the worker report is the only option', async () => {
   assert.equal(resolved.source, 'worker-report');
   assert.deepEqual(resolved.files, ['claimed.ts']);
   assert.equal(diffSnapshots(null, null), null);
+});
+
+test('the result is found inside the event array the CLI actually emits', () => {
+  // `claude -p --output-format json` writes the whole run as one line holding a
+  // JSON array. Treating that array as the result object reads undefined for
+  // every field, which surfaces as "worker produced no output" and escalates
+  // through every tier, because each one fails the same way.
+  const events = [
+    { type: 'system', subtype: 'init' },
+    { type: 'assistant', message: {} },
+    { type: 'rate_limit_event' },
+    { type: 'result', result: 'done', structured_output: { summary: 'done' }, total_cost_usd: 0.01 },
+  ];
+  assert.equal(resultEvent(events).result, 'done');
+  assert.equal(extractUsage(resultEvent(events)).costUsd, 0.01);
+
+  // A bare result object still works, so an older CLI is unaffected.
+  assert.equal(resultEvent({ type: 'result', result: 'done' }).result, 'done');
+  // An array carrying no result at all is a failure, not a silent empty answer.
+  assert.equal(resultEvent([{ type: 'system' }]), null);
 });

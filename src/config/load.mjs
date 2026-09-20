@@ -4,6 +4,7 @@ import { parseYaml } from './yaml.mjs';
 import { defaultConfigPath, userConfigCandidates } from '../util/paths.mjs';
 import { PROVIDERS, providerNames, resolveProvider } from '../router/providers.mjs';
 import { pluginOptionOverrides } from './plugin-options.mjs';
+import { engineNames, selectedEngineName } from '../router/engines/index.mjs';
 import { log } from '../util/log.mjs';
 
 export const ROUTING_MODES = [
@@ -118,12 +119,19 @@ function validate(config) {
     }
   }
 
+  const evaluator = selectedEngineName(config);
+  if (!engineNames().includes(evaluator)) {
+    problems.push(`routing.semanticEvaluator.provider must be one of ${engineNames().join(', ')}`);
+  }
+
   // Resolving the provider here means a bad endpoint or a missing accountId is
-  // reported at startup rather than on the first delegation.
+  // reported at startup rather than on the first delegation. Only the arms that
+  // actually call Jev need it: policy-graph may be answered by another engine.
   const jev = config.routing?.jev ?? {};
+  const usesJev = mode === 'jev-direct' || (mode === 'policy-graph' && evaluator === 'jev');
   if (jev.provider && !PROVIDERS[jev.provider]) {
     problems.push(`routing.jev.provider must be one of ${providerNames().join(', ')}`);
-  } else if (mode === 'policy-graph' || mode === 'jev-direct') {
+  } else if (usesJev) {
     try {
       resolveProvider(jev);
     } catch (error) {

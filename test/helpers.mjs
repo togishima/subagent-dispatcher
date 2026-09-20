@@ -2,6 +2,32 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { loadConfig, deepMerge } from '../src/config/load.mjs';
+import { PROVIDERS } from '../src/router/providers.mjs';
+
+/**
+ * Cut the suite off from the developer's own machine.
+ *
+ * A real ~/.jev-dispatch/config.yaml used to be loaded by `testConfig`, which
+ * silently repointed the tests at whatever provider that config names. The
+ * failures were bewildering — a dozen unrelated assertions — and one of them
+ * printed the live API key of the substituted provider into the test output,
+ * because the key a test plants is only honoured while the expected provider
+ * is in play. So: no user config, and no real key in the environment.
+ */
+for (const provider of Object.values(PROVIDERS)) delete process.env[provider.apiKeyEnv];
+
+/**
+ * A config path that cannot exist. Pointing JEV_DISPATCH_CONFIG at it is what
+ * keeps ~/.jev-dispatch/config.yaml out of the run: the loader takes this as
+ * the sole candidate, so only the shipped defaults apply. Set on the process
+ * rather than around each call, because the CLI tests spawn children that
+ * inherit the environment and would otherwise read the real file themselves.
+ */
+const NO_USER_CONFIG = path.join(
+  fs.mkdtempSync(path.join(os.tmpdir(), 'jev-no-config-')),
+  'absent.json',
+);
+process.env.JEV_DISPATCH_CONFIG = NO_USER_CONFIG;
 
 /** A temp directory that cleans itself up when the test process exits. */
 export function tempDir(prefix = 'jev-test-') {
@@ -26,8 +52,7 @@ export function testConfig(overrides = {}) {
   try {
     return loadConfig({ reload: true });
   } finally {
-    if (previous === undefined) delete process.env.JEV_DISPATCH_CONFIG;
-    else process.env.JEV_DISPATCH_CONFIG = previous;
+    process.env.JEV_DISPATCH_CONFIG = previous ?? NO_USER_CONFIG;
   }
 }
 

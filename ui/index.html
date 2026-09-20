@@ -34,6 +34,7 @@
   <button data-view="overview" aria-current="true">Overview</button>
   <button data-view="timeline">Routing timeline</button>
   <button data-view="policy">Policy effectiveness</button>
+  <button data-view="evaluators">Evaluators</button>
   <button data-view="specification">Specification</button>
   <button data-view="confidence">Confidence</button>
   <button data-view="workers">Workers</button>
@@ -73,10 +74,37 @@
     <div class="card">
       <h2>Predicate effectiveness</h2>
       <p class="note">
-        Per node: how often traversal reached it, how confident Jev was, and what happened downstream of each branch.
+        Per node: how often traversal reached it, how confident the evaluator was, and what happened downstream of each branch.
         A predicate whose branches have the same outcome is not routing anything.
       </p>
       <div id="predicates"></div>
+    </div>
+  </section>
+
+  <section id="view-evaluators" hidden>
+    <div class="card">
+      <h2>Same policy, different evaluator</h2>
+      <p class="note">
+        Who answered the policy graph's semantic predicates. The graph is identical across these rows,
+        so a difference here is a difference in the evaluator, not in the routing policy.
+        Latency is the obvious difference and the least interesting one — an evaluator that answers in
+        15&nbsp;ms but under-routes is worse than one that takes 300&nbsp;ms and does not.
+      </p>
+      <div class="scroll"><table id="evaluators"></table></div>
+    </div>
+    <div class="card">
+      <h2>Routing latency</h2>
+      <p class="note">Median and p95 of the evaluator's own reported time, measured only. Local inference and a network call on one scale.</p>
+      <div class="bars" id="evaluator-latency"></div>
+    </div>
+    <div class="card">
+      <h2>Predicate agreement</h2>
+      <p class="note">
+        How often each evaluator answered yes to the same predicate. Task text is not stored, so this is
+        not a replay of identical inputs — it is the distribution per predicate. A wide spread means the
+        evaluators disagree about what that question means.
+      </p>
+      <div id="agreement"></div>
     </div>
   </section>
 
@@ -160,7 +188,9 @@
       <h2>Experiment arms</h2>
       <p class="note">
         One row per arm, scored identically. Arm A is <b>fixed-high</b>, arm B is <b>jev-direct</b>
-        (Jev classifies the tier itself), arm C is <b>policy-graph</b> (Jev answers only semantic predicates).
+        (Jev classifies the tier itself), and arm C is <b>policy-graph</b>, where an evaluator answers
+        only the boolean predicates — with Jev or with Laya running locally. See the Evaluators view to
+        compare those two against each other.
       </p>
       <div class="scroll"><table id="comparison"></table></div>
     </div>

@@ -44,10 +44,14 @@ const TASKS = [
   ['extract the duplicated date parsing into a shared utility', 'refactor'],
 ];
 
+// Four arms: the baseline, Jev classifying the tier itself, and the policy
+// graph answered by each evaluator in turn. The last two share a policy, so a
+// difference between them is a difference in the evaluator.
 const ARMS = [
-  { mode: 'fixed', fixedTier: topTier, router: 'fixed', share: 0.25 },
-  { mode: 'jev-direct', router: 'jev-direct', share: 0.3 },
-  { mode: 'policy-graph', router: 'policy-graph', share: 0.45 },
+  { mode: 'fixed', fixedTier: topTier, router: 'fixed', share: 0.2 },
+  { mode: 'jev-direct', router: 'jev-direct', evaluator: 'jev-direct', share: 0.2 },
+  { mode: 'policy-graph', router: 'policy-graph', evaluator: 'jev', share: 0.3 },
+  { mode: 'policy-graph', router: 'policy-graph', evaluator: 'laya', share: 0.3 },
 ];
 
 function armFor(value) {
@@ -125,11 +129,15 @@ for (let i = 0; i < count; i += 1) {
     attempt += 1;
     let decision;
 
+    const local = arm.evaluator === 'laya';
     if (arm.mode === 'policy-graph') {
       const answers = {};
       for (const node of semantic) {
         // A caller who wrote a plan usually wrote a followable one.
-        const bias = node.id === 'plan_is_executable' ? (specification.hasPlan ? 0.78 : 0.2) : 0.45;
+        let bias = node.id === 'plan_is_executable' ? (specification.hasPlan ? 0.78 : 0.2) : 0.45;
+        // A smaller local model is modelled as slightly less decisive, which is
+        // the effect the comparison is meant to detect rather than assume.
+        if (local) bias = bias * 0.92 + 0.04;
         answers[node.id] = semanticAnswer(bias);
       }
       const walk = traverse(
@@ -161,9 +169,16 @@ for (let i = 0; i < count; i += 1) {
             uncertain: step?.uncertain ?? null,
           };
         }),
-        routingLatencyMs: 90 + Math.round(random() * 260),
-        jevLatencyMs: 70 + Math.round(random() * 230),
-        jevUsage: { input_tokens: 240 + Math.round(random() * 300), output_tokens: 0 },
+        routingLatencyMs: local ? 8 + Math.round(random() * 22) : 90 + Math.round(random() * 260),
+        evaluator: {
+          engine: arm.evaluator,
+          model: local ? 'aac6fef/laya-mlx' : 'jev-latest',
+          // Local inference is an order of magnitude faster; whether it routes
+          // as well is the question the dashboard exists to answer.
+          latencyMs: local ? 7 + Math.round(random() * 18) : 70 + Math.round(random() * 230),
+          usage: local ? null : { input_tokens: 240 + Math.round(random() * 300), output_tokens: 0 },
+          metadata: local ? { runtime: 'laya_mlx', predicateCount: semantic.length, batched: true, modelLoadMs: 812 } : null,
+        },
         reason: walk.reason,
         degraded: false,
         error: null,
@@ -180,8 +195,12 @@ for (let i = 0; i < count; i += 1) {
         trail: [],
         semanticEvaluations: [],
         routingLatencyMs: 80 + Math.round(random() * 200),
-        jevLatencyMs: 70 + Math.round(random() * 180),
-        jevUsage: { input_tokens: 190 + Math.round(random() * 200), output_tokens: 0 },
+        evaluator: {
+          engine: 'jev-direct', model: 'jev-latest',
+          latencyMs: 70 + Math.round(random() * 180),
+          usage: { input_tokens: 190 + Math.round(random() * 200), output_tokens: 0 },
+          metadata: null,
+        },
         reason: 'jev-direct',
         degraded: false,
         error: null,
@@ -196,8 +215,7 @@ for (let i = 0; i < count; i += 1) {
         trail: [],
         semanticEvaluations: [],
         routingLatencyMs: 0,
-        jevLatencyMs: null,
-        jevUsage: null,
+        evaluator: null,
         reason: `fixed-${arm.fixedTier}`,
         degraded: false,
         error: null,

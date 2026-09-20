@@ -8,6 +8,7 @@ import { ingestMetrics } from './otlp.mjs';
 import {
   overview, timeline, taskDetail, confidenceView, workerView,
   policyView, policyComparison, cacheCostView, policyVersionsSeen, specificationView,
+  evaluatorView, predicateAgreement, evaluatorsSeen,
 } from './queries.mjs';
 
 /**
@@ -108,6 +109,14 @@ export function createTelemetryServer(config, store) {
     }),
     '/api/confidence': (url) => confidenceView(store, { since: parseWindow(url) }),
     '/api/specification': (url) => specificationView(store, { since: parseWindow(url) }),
+    '/api/evaluators': (url) => ({
+      evaluators: evaluatorView(store, {
+        since: parseWindow(url),
+        policyVersion: url.searchParams.get('policyVersion') || null,
+      }),
+      agreement: predicateAgreement(store, { policyVersion: url.searchParams.get('policyVersion') || null }),
+      configured: config.routing.semanticEvaluator?.provider ?? 'jev',
+    }),
     '/api/workers': (url) => workerView(store, { since: parseWindow(url) }),
     '/api/policy': (url) => policyView(store, { policyVersion: url.searchParams.get('policyVersion') || null }),
     '/api/comparison': () => policyComparison(store),
@@ -118,6 +127,8 @@ export function createTelemetryServer(config, store) {
         .sort((a, b) => a[1].order - b[1].order)
         .map(([name, tier]) => ({ name, worker: tier.worker, frontier: Boolean(config.workers[tier.worker]?.frontier) })),
       policyVersions: policyVersionsSeen(store),
+      semanticEvaluator: config.routing.semanticEvaluator?.provider ?? 'jev',
+      evaluatorsSeen: evaluatorsSeen(store),
       otelEndpoint: config.otel.receiverEnabled ? `http://${config.ui.host}:${config.ui.port}` : null,
       dbPath: store.file,
       debugStoreRawInput: config.telemetry.debugStoreRawInput,

@@ -32,11 +32,15 @@ The plugin ships all three arms so the question is measured rather than argued:
 ```
 Main Claude Code session  (Fable / Opus — model never changes, cache intact)
         │
-        │  delegate({ task, context, expectedOutput, verification? })
+        │  delegate({ task, plan, contextFiles, acceptanceCriteria, … })
         ▼
    Routing policy graph            ← data, versioned, not code
         ├── deterministic predicates   (ordinary code, no model call)
-        └── semantic predicates        → one batched Jev call
+        └── semantic predicates        → one batched call to a
+        │                                semantic decision engine:
+        │                                  Laya, locally on Apple silicon
+        │                                  Jev, over the network
+        │                                  mock, fixed answers
         ▼
    deterministic traversal → LOW | MEDIUM | HIGH
         ▼
@@ -61,12 +65,12 @@ transcripts never enter its context — only a summary comes back.
 tool, `delegate`, whose schema contains no model, provider, tier or effort
 parameter. There is no knob, so there is no wrong setting.
 
-**Jev never sees a model name either.** It is a semantic predicate evaluator,
-not a scheduler. It answers narrow boolean questions — *is this primarily
-mechanical? does it require cross-cutting reasoning? is the root cause
+**The evaluator never sees a model name either.** It is a semantic predicate
+evaluator, not a scheduler. It answers narrow boolean questions — *is this
+primarily mechanical? does it require cross-cutting reasoning? is the root cause
 unknown?* — over a small structured state. The tier is then decided by ordinary
 deterministic code walking the graph, which means every routing decision is
-reproducible from telemetry.
+reproducible from telemetry, and the graph cannot tell which engine replied.
 
 **Uncertainty over-routes.** When a predicate's confidence falls below its
 threshold, traversal takes the safer branch instead of the answered one. Which
@@ -115,7 +119,7 @@ routing:
   jev:
     provider: cloudflare
     accountId: "<your account id>"     # CLOUDFLARE_API_TOKEN
-    model: "@typesafe/jev-1.13.0"
+    model: "typesafe/jev"               # jev-1.13.0 is what the response echoes
 
 # Vercel AI Gateway
 routing:
@@ -286,9 +290,16 @@ worth that. Neither mode says anything when a brief is already mostly complete.
 jev-dispatch ui       # http://127.0.0.1:4319/
 ```
 
-Eight views: overview KPIs, the routing timeline (escalations shown as indented
-retries), policy effectiveness, specification effectiveness, confidence against
-outcome, worker performance, cache & cost, and the arm comparison.
+Nine views: overview KPIs, the routing timeline (escalations shown as indented
+retries), policy effectiveness, evaluator comparison, specification
+effectiveness, confidence against outcome, worker performance, cache & cost, and
+the arm comparison.
+
+The **Evaluators** view is where the local-versus-remote question is answered:
+routing quality and latency in one table, a latency chart on one scale, and a
+per-predicate agreement table showing how differently two engines answer the
+same question. Each row states whether that engine keeps the routing state on
+this machine.
 
 Loopback only. A non-loopback bind address is refused outright, not merely
 defaulted away from, and nothing is ever sent anywhere.
@@ -342,6 +353,84 @@ routing latency, and confidence against success.
 compares against what top-tier delegations in *this* database actually cost.
 With no top-tier runs recorded it shows `—` rather than a guess, which is
 another reason to run arm A.
+
+## Why a local semantic evaluator?
+
+```
+Main session
+   ↓
+policy graph              deterministic, versioned, data
+   ↓
+semantic predicates       narrow boolean questions
+   ↓
+Laya local / Jev remote   ← interchangeable
+   ↓
+deterministic tier        LOW | MEDIUM | HIGH
+```
+
+Jev started as the first evaluator, which is why the package is named for it.
+Laya is not a replacement: it is the same semantic-predicate role filled by a
+~300–400M model running on this machine, so the two can be compared through one
+policy graph.
+
+That makes the comparison worth running. A local evaluator answers in
+milliseconds instead of hundreds, costs nothing per call, and sends the routing
+state nowhere. What is unknown is whether it routes as *well* — and a 15 ms
+evaluator that under-routes is worse than a 300 ms one that does not, because
+under-routing is paid for twice: once in a failed cheap attempt and again in the
+escalation. So the Evaluators view puts first-route success, escalation and
+frontier rate beside the latency rather than in another tab.
+
+```yaml
+routing:
+  mode: policy-graph               # unchanged
+  semanticEvaluator:
+    provider: laya                 # jev | laya | mock
+    laya:
+      model: aac6fef/laya-mlx      # or aac6fef/laya-multilingual-mlx
+      runtime: auto                # auto | mlx | torch
+      timeoutMs: 5000
+```
+
+```bash
+pip install laya-mlx              # Apple silicon; `pip install laya` elsewhere
+jev-dispatch evaluators           # what is available and what is selected
+jev-dispatch check-evaluator      # one real evaluation, including the model load
+```
+
+Laya ships as a library with no server mode, and its CLI reloads the model on
+every invocation — which is exactly what must not happen when routing calls it
+many times a session. So a small Python process (`runtime/laya_server.py`) holds
+the loaded model and answers over stdio: model load once at first use, then many
+evaluations, then exit with the session. No inference is reimplemented in Node;
+the adapter starts a process, frames JSON and applies a timeout.
+
+Every semantic predicate still goes out in **one** call. Laya batches natively
+(16 questions per forward pass by default), so this property is preserved rather
+than worked around.
+
+Model load time, resident memory, batch size and predicate count are recorded
+alongside each routing decision, because "fast once warm" is only interesting if
+the warm-up is accounted for.
+
+**Failure behaviour is identical to Jev's.** A process that will not start, a
+model that will not load, a timeout or a malformed answer all take the safer
+branch at every semantic node. A local engine crashing is no more a reason to
+under-route than a remote one timing out, and `onEvaluatorUnavailable` still
+governs whether that means the strongest tier or a capped fallback.
+
+### Comparing them
+
+| Arm | `routing.mode` | `semanticEvaluator.provider` |
+|---|---|---|
+| A | `fixed-high` | — |
+| B | `jev-direct` | — |
+| C | `policy-graph` | `jev` |
+| D | `policy-graph` | `laya` |
+
+C and D share a policy graph, so a difference between them is a difference in
+the evaluator. `jev-direct` is deliberately untouched: it asks Jev for the tier
+itself, which is the thing the policy graph is being measured against.
 
 ## The routing policy
 
@@ -498,10 +587,12 @@ to, and the dispatcher stops rather than paying twice for the same failure.
 
 Local-first, and nothing leaves the machine except the routing state Jev needs.
 
-Plan text is the exception worth stating plainly: judging whether a plan is
-followable means reading it, so the plan goes to Jev along with the routing
-state — truncated to `routing.jev.maxPlanChars`, and only while
-`routing.jev.sendPlan` is true. Turn it off and `plan_is_executable` degrades to
+Plan text is the exception worth stating plainly, and it depends on the
+evaluator. With **Laya**, the routing state and the plan are read by a model on
+this machine and go nowhere — the dashboard marks every delegation it routed as
+local. With **Jev**, judging whether a plan is followable means sending it, so
+the plan goes to the provider along with the routing state — truncated to
+`routing.jev.maxPlanChars`, and only while `routing.jev.sendPlan` is true. Turn it off and `plan_is_executable` degrades to
 its safer branch like any other unanswered predicate.
 
 The database stores a task id, a SHA-256 hash, an optional short sanitized
@@ -596,7 +687,14 @@ would rather cap the cost.
   quality numbers. The dashboard reports the unverified rate for this reason.
 - **The OTel counter store is a snapshot, not a time series.** It answers "what
   is the cache read ratio", not "how did it move over the last hour".
-- **The Jev integration has not been run against a live service.** Everything
+- **Neither evaluator has been run against a live service here.** The Laya
+  backend is exercised against a fake process that speaks the documented
+  protocol, and `runtime/laya_server.py` is compiled and driven end to end
+  against a stand-in module — but no real model has been loaded, because that
+  needs Apple silicon. `jev-dispatch check-evaluator` is how you confirm it on a
+  machine that has one; the M3 Max figures quoted upstream (13.4 ms P50 for the
+  421M checkpoint, 7.4 ms for the 322M) are theirs, not measurements from here.
+- **The Jev integration has not been run against a live service either.** Everything
   downstream of routing — worker execution, verification, escalation, telemetry,
   the dashboard — was verified end to end with `fixed-*` modes, which make no
   routing calls. The router itself is covered only by tests that stub `fetch`
@@ -611,6 +709,8 @@ jev-dispatch doctor                    check config, policy, workers, key, telem
 jev-dispatch route <task…>             dry-run the router and print the traversal
 jev-dispatch providers                 list the Jev providers this build knows about
 jev-dispatch check-router              make one real Jev request and print the response
+jev-dispatch evaluators                list the semantic engines and which is selected
+jev-dispatch check-evaluator           run one real evaluation through the selected engine
 jev-dispatch policy                    print the active routing policy
 jev-dispatch predicates                list deterministic predicates
 jev-dispatch status                    headline metrics as JSON

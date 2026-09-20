@@ -22,6 +22,15 @@
       }
     },
 
+    "semanticEvaluator": {
+      "$comment": "Who answers the policy graph's boolean predicates. The graph itself is unaffected by this choice. jev calls TypeSafe or a gateway; laya runs locally on Apple silicon; mock returns fixed answers. Leaving this out keeps the original behaviour, which is jev.",
+      "provider": "jev",
+      "mock": {
+        "answers": {},
+        "defaultProbability": 0.5
+      }
+    },
+
     "jev": {
       "$comment": "provider picks the defaults below; every one of them can be overridden. Only the typesafe shape has been checked against a running service — run `jev-dispatch check-router` before trusting another.",
       "provider": "typesafe",

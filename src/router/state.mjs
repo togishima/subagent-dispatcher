@@ -4,10 +4,11 @@
  * Deliberately small and structured: the main conversation's history never goes
  * here. The caller supplies a summary, and everything else is metadata the
  * dispatcher already knows. Keeping this small is both a cost and a privacy
- * property — Jev is billed per input token, and the state is the only place task
- * text leaves the machine.
+ * property — a remote engine is billed per input token, and for one this state
+ * is the only place task text leaves the machine at all. A local engine reads
+ * the same state without it going anywhere.
  */
-export function buildRoutingState(input, jevConfig = {}) {
+export function buildRoutingState(input, stateOptions = {}) {
   const state = {
     subtask: input.task,
     expected_output: input.expectedOutput ?? null,
@@ -29,8 +30,8 @@ export function buildRoutingState(input, jevConfig = {}) {
       files_to_change_named: specification.hasEditSites,
       constraints_stated: specification.hasConstraints,
     };
-    if (specification.hasPlan && jevConfig.sendPlan !== false) {
-      const limit = jevConfig.maxPlanChars ?? 4000;
+    if (specification.hasPlan && stateOptions.sendPlan !== false) {
+      const limit = stateOptions.maxPlanChars ?? 4000;
       const plan = [input.plan, ...(input.planDocuments ?? []).map((doc) => doc.content)]
         .filter(Boolean)
         .join('\n\n');
