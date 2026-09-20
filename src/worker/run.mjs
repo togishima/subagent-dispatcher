@@ -111,6 +111,24 @@ function spawnCollect(command, args, options) {
 
 const number = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
+/**
+ * The result object, whichever envelope `claude -p --output-format json` used.
+ *
+ * It emits the whole run on one line: a JSON array of events — `system`,
+ * `assistant`, `rate_limit_event`, and finally `result`. Reading that array as
+ * though it were the result object yields `undefined` for every field, which
+ * this dispatcher reports as "worker produced no output" and escalates — at
+ * every tier in turn, since each one fails identically. A bare result object is
+ * still accepted, so an older CLI keeps working.
+ */
+export function resultEvent(parsed) {
+  if (!Array.isArray(parsed)) return parsed;
+  for (let i = parsed.length - 1; i >= 0; i -= 1) {
+    if (parsed[i]?.type === 'result') return parsed[i];
+  }
+  return null;
+}
+
 /** Pull the usage figures out of a `claude -p --output-format json` result. */
 export function extractUsage(result) {
   const usage = result?.usage ?? {};
@@ -179,7 +197,7 @@ export async function runWorker({ worker, task, config, checks = [] }) {
 
   let result = null;
   try {
-    result = JSON.parse(run.stdout.trim().split('\n').filter(Boolean).pop() ?? '');
+    result = resultEvent(JSON.parse(run.stdout.trim().split('\n').filter(Boolean).pop() ?? ''));
   } catch {
     // fall through: handled as a process error below
   }
