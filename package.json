@@ -8,7 +8,7 @@
   "engines": { "node": ">=22.5.0" },
   "bin": { "jev-dispatch": "./bin/jev-dispatch" },
   "scripts": {
-    "test": "node --test --experimental-sqlite test/",
+    "test": "node --test --experimental-sqlite \"test/**/*.test.mjs\"",
     "ui": "node --experimental-sqlite bin/jev-dispatch ui",
     "doctor": "node --experimental-sqlite bin/jev-dispatch doctor"
   },

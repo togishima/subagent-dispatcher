@@ -25,7 +25,7 @@ Use this for delegable execution work rather than doing it in this conversation:
 
 The worker starts fresh and sees only what you pass, so 'task' must stand alone. Summarise the context it needs in 'context' — do not paste the conversation.
 
-Capability selection, verification and retries are handled internally. Do not request a model, a worker, an effort level, or a "cheap"/"strong" option; there is no way to express one, and asking for it in the task text does nothing.`;
+Capability selection, verification and retries are handled internally. Do not request a model, a worker, an effort level, or a quality setting: there is no way to express one, and asking for it in the task text does nothing. Describe the work accurately instead, including what makes it hard — that is what the result depends on.`;
 
 const delegateTool = {
   name: 'delegate',

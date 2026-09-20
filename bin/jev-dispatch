@@ -1,0 +1,280 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadConfig, orderedTiers, ROUTING_MODES } from '../src/config/load.mjs';
+import { openStore } from '../src/telemetry/store.mjs';
+import { createTelemetryServer } from '../src/telemetry/server.mjs';
+import { createRouter } from '../src/router/index.mjs';
+import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
+import { predicateNames } from '../src/policy/predicates.mjs';
+import { applicableChecks } from '../src/verify/index.mjs';
+import { overview, policyComparison } from '../src/telemetry/queries.mjs';
+import { dataDir, userConfigCandidates } from '../src/util/paths.mjs';
+
+const [command, ...rest] = process.argv.slice(2);
+
+const USAGE = `jev-dispatch — Jev-powered subagent scheduler
+
+  ui                        Serve the dashboard on the configured loopback port
+  doctor                    Check the installation: config, policy, worker binary, Jev key
+  route <task…>             Dry-run the router on a task and print the traversal
+  status                    Print the experiment's headline metrics
+  compare                   Print one row per experiment arm
+  config                    Print the effective configuration
+  config path               Print where configuration is read from
+  config set <key> <value>  Write one dotted key into the user config
+  policy                    Print the active routing policy
+  predicates                List the deterministic predicates a policy may use
+  purge [--yes]             Delete the telemetry database
+`;
+
+const config = loadConfig();
+
+function userConfigPath() {
+  const existing = userConfigCandidates().find((candidate) => fs.existsSync(candidate));
+  return existing ?? path.join(dataDir, 'config.json');
+}
+
+function setConfigKey(dottedKey, rawValue) {
+  const file = userConfigPath();
+  if (/\.ya?ml$/i.test(file)) {
+    console.error(`refusing to rewrite ${file}: edit YAML config by hand, or use a JSON config`);
+    process.exit(1);
+  }
+  const current = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+  let value = rawValue;
+  if (rawValue === 'true') value = true;
+  else if (rawValue === 'false') value = false;
+  else if (rawValue === 'null') value = null;
+  else if (/^-?\d+(\.\d+)?$/.test(rawValue)) value = Number(rawValue);
+  else if (rawValue.startsWith('[') || rawValue.startsWith('{')) value = JSON.parse(rawValue);
+
+  const keys = dottedKey.split('.');
+  let node = current;
+  for (const key of keys.slice(0, -1)) {
+    if (typeof node[key] !== 'object' || node[key] === null) node[key] = {};
+    node = node[key];
+  }
+  node[keys.at(-1)] = value;
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(current, null, 2)}\n`);
+  console.log(`${file}: ${dottedKey} = ${JSON.stringify(value)}`);
+  // Re-validate so a bad write is caught here rather than at the next dispatch.
+  loadConfig({ reload: true });
+}
+
+async function doctor() {
+  const problems = [];
+  const ok = (label, detail) => console.log(`  ok    ${label}${detail ? ` — ${detail}` : ''}`);
+  const bad = (label, detail) => { problems.push(label); console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`); };
+  const warn = (label, detail) => console.log(`  warn  ${label}${detail ? ` — ${detail}` : ''}`);
+
+  console.log('configuration');
+  ok('config valid', config.$sources.length ? config.$sources.join(', ') : 'defaults only');
+  ok('routing mode', config.routing.mode);
+  ok('tiers', orderedTiers(config).map((tier) => `${tier}→${config.tiers[tier].worker}`).join(', '));
+
+  console.log('\nrouting policy');
+  if (config.routing.mode === 'policy-graph') {
+    try {
+      const policy = loadPolicy(config);
+      ok(`policy ${policy.version}`, `${policy.nodes.size} nodes, ${semanticNodes(policy).length} semantic`);
+    } catch (error) {
+      bad('policy graph', error.message.split('\n')[0]);
+    }
+  } else {
+    warn('policy graph not in use', `mode is ${config.routing.mode}`);
+  }
+
+  console.log('\nsemantic evaluator');
+  const keyName = config.routing.jev.apiKeyEnv;
+  const needsJev = config.routing.mode === 'policy-graph' || config.routing.mode === 'jev-direct';
+  if (!needsJev) warn('Jev not needed', `mode ${config.routing.mode} makes no model calls to route`);
+  else if (process.env[keyName]) ok(`${keyName} present`, `endpoint ${config.routing.jev.endpoint}`);
+  else {
+    bad(`${keyName} not set`, 'routing will degrade to the safer branch at every semantic node');
+  }
+
+  console.log('\nworkers');
+  for (const tier of orderedTiers(config)) {
+    const worker = config.workers[config.tiers[tier].worker];
+    const kind = worker.kind ?? 'claude-agent';
+    if (kind === 'claude-agent') {
+      const agentFile = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'agents', `${worker.agent}.md`);
+      if (fs.existsSync(agentFile)) ok(`${tier} → ${worker.model}`, `agent ${worker.agent}`);
+      else warn(`${tier} → ${worker.model}`, `agent ${worker.agent} not bundled; must be installed separately`);
+    } else {
+      ok(`${tier} → command`, worker.command.join(' '));
+    }
+  }
+  const claudeBin = process.env.JEV_DISPATCH_CLAUDE_BIN || 'claude';
+  const { execFileSync } = await import('node:child_process');
+  try {
+    const version = execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 20_000 }).trim();
+    ok('worker runtime', `${claudeBin} — ${version}`);
+  } catch {
+    bad('worker runtime', `could not run "${claudeBin} --version"`);
+  }
+
+  console.log('\nverification');
+  const checks = applicableChecks(config, { cwd: process.cwd(), taskType: null });
+  if (checks.length > 0) ok(`${checks.length} check(s) apply here`, checks.map((check) => check.name).join(', '));
+  else {
+    warn(
+      'no verification checks configured',
+      'every result will be UNCERTAIN, and the policy will never route to the cheapest tier',
+    );
+  }
+
+  console.log('\ntelemetry');
+  const store = openStore(config);
+  const stats = overview(store);
+  ok('database', store.file);
+  ok('recorded delegations', String(stats.delegations));
+  ok('dashboard', `http://${config.ui.host}:${config.ui.port}/`);
+  if (config.telemetry.debugStoreRawInput) warn('raw input capture is ON', 'task text is being written to the database');
+  else ok('raw input capture off', 'only hashes and sanitized titles are stored');
+  if (process.env.CLAUDE_CODE_ENABLE_TELEMETRY === '1') ok('Claude Code OTel enabled');
+  else warn('Claude Code OTel not enabled', 'main-session cache figures will be unavailable');
+  store.close();
+
+  console.log(problems.length === 0 ? '\nAll checks passed.' : `\n${problems.length} problem(s): ${problems.join('; ')}`);
+  process.exit(problems.length === 0 ? 0 : 1);
+}
+
+async function route(taskWords) {
+  const task = taskWords.join(' ');
+  if (!task) { console.error('usage: jev-dispatch route <task…>'); process.exit(1); }
+  const router = createRouter(config);
+  const checks = applicableChecks(config, { cwd: process.cwd(), taskType: null });
+  const decision = await router.route({
+    task,
+    cwd: process.cwd(),
+    attempt: 1,
+    verificationAvailable: checks.length > 0,
+    contextFiles: [],
+    riskFlags: [],
+    tierOrders: Object.fromEntries(Object.entries(config.tiers).map(([name, tier]) => [name, tier.order])),
+  });
+
+  console.log(`mode         ${config.routing.mode}`);
+  if (decision.policyVersion) console.log(`policy       ${decision.policyVersion}`);
+  console.log(`tier         ${decision.requiredTier} → ${config.tiers[decision.requiredTier].worker}`);
+  console.log(`reason       ${decision.reason}`);
+  console.log(`confidence   ${decision.confidence == null ? '—' : decision.confidence.toFixed(3)}`);
+  console.log(`latency      ${decision.routingLatencyMs}ms${decision.jevLatencyMs == null ? '' : ` (Jev ${decision.jevLatencyMs}ms)`}`);
+  if (decision.error) console.log(`degraded     ${decision.error}`);
+
+  if (decision.trail.length > 0) {
+    console.log('\ntraversal');
+    for (const step of decision.trail) {
+      const confidence = step.confidence == null ? '' : ` conf=${step.confidence.toFixed(2)}`;
+      const flag = step.uncertain ? '  (over-routed: below threshold)' : '';
+      const target = step.tier ? `tier ${step.tier}` : `→ ${step.next}`;
+      console.log(`  ${String(step.order + 1).padStart(2)}. ${step.nodeId.padEnd(22)} ${step.type.padEnd(14)} ${step.result.padEnd(4)}${confidence.padEnd(12)} ${target}${flag}`);
+    }
+  }
+  const unused = decision.semanticEvaluations.filter((entry) => !entry.used);
+  if (unused.length > 0) {
+    console.log('\nevaluated but not reached');
+    for (const entry of unused) {
+      console.log(`      ${entry.nodeId.padEnd(22)} ${String(entry.result ?? '—').padEnd(4)} conf=${entry.confidence == null ? '—' : entry.confidence.toFixed(2)}`);
+    }
+  }
+}
+
+switch (command) {
+  case 'ui': {
+    const store = openStore(config);
+    const { listen } = createTelemetryServer(config, store);
+    const url = await listen();
+    console.log(`jev-dispatch dashboard: ${url}`);
+    console.log(`database: ${store.file}`);
+    if (config.otel.receiverEnabled) {
+      console.log(`OTLP receiver: ${url}v1/metrics (set OTEL_EXPORTER_OTLP_PROTOCOL=http/json)`);
+    }
+    break;
+  }
+  case 'doctor':
+    await doctor();
+    break;
+  case 'route':
+    await route(rest);
+    break;
+  case 'status': {
+    const store = openStore(config);
+    console.log(JSON.stringify(overview(store), null, 2));
+    store.close();
+    break;
+  }
+  case 'compare': {
+    const store = openStore(config);
+    const rows = policyComparison(store);
+    if (rows.length === 0) console.log('no finished delegations yet');
+    else console.table(rows.map((row) => ({
+      arm: `${row.routing_mode} ${row.policy_version}`,
+      n: row.delegations,
+      success: row.task_success_rate,
+      firstRoute: row.first_route_success_rate,
+      escalation: row.escalation_rate,
+      frontier: row.frontier_invocation_rate,
+      cost: row.total_cost_usd,
+      perSuccess: row.costPerSuccess,
+    })));
+    store.close();
+    break;
+  }
+  case 'config':
+    if (rest[0] === 'path') {
+      console.log(`reading:  ${config.$sources.length ? config.$sources.join(', ') : '(defaults only)'}`);
+      console.log(`writing:  ${userConfigPath()}`);
+      console.log(`searched: ${userConfigCandidates().join('\n          ')}`);
+    } else if (rest[0] === 'set') {
+      if (rest.length < 3) { console.error('usage: jev-dispatch config set <dotted.key> <value>'); process.exit(1); }
+      setConfigKey(rest[1], rest.slice(2).join(' '));
+    } else {
+      const { $sources, $configDir, ...rest2 } = config;
+      console.log(JSON.stringify(rest2, null, 2));
+    }
+    break;
+  case 'policy': {
+    const policy = loadPolicy(config);
+    console.log(`${policy.version}  (${policy.source})`);
+    if (policy.description) console.log(`${policy.description}\n`);
+    console.log(`entry: ${policy.entry}   fallback tier: ${policy.fallbackTier}\n`);
+    for (const node of policy.nodes.values()) {
+      const edge = (branch) => (node[branch].tier ? `tier ${node[branch].tier}` : `→ ${node[branch].goto}`);
+      console.log(`${node.id}  [${node.type}${node.predicate ? ` ${node.predicate}` : ''}]`);
+      if (node.question) console.log(`  ? ${node.question}`);
+      console.log(`  yes: ${edge('yes')}`);
+      console.log(`  no:  ${edge('no')}`);
+      if (node.type === 'semantic') console.log(`  uncertain → ${node.$safer} (${node.$saferSource})`);
+      console.log('');
+    }
+    break;
+  }
+  case 'predicates':
+    for (const name of predicateNames()) console.log(name);
+    break;
+  case 'purge': {
+    const store = openStore(config);
+    const file = store.file;
+    store.close();
+    if (!rest.includes('--yes')) {
+      console.log(`would delete ${file}\nre-run with --yes to confirm`);
+      break;
+    }
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
+      if (fs.existsSync(file + suffix)) fs.rmSync(file + suffix);
+    }
+    console.log(`deleted ${file}`);
+    break;
+  }
+  case 'modes':
+    console.log(ROUTING_MODES.join('\n'));
+    break;
+  default:
+    console.log(USAGE);
+    process.exit(command === undefined || command === 'help' || command === '--help' ? 0 : 1);
+}

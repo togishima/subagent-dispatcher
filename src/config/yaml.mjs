@@ -17,8 +17,11 @@
  */
 
 const UNSUPPORTED = [
-  [/^\s*[&*]\S/, 'anchors and aliases'],
-  [/^\s*!!?\S/, 'tags'],
+  // An anchor or alias in key OR value position. Requiring a word character
+  // after the sigil keeps shell values such as `npm test && npm run lint` and
+  // `rm -f *.tmp` from being mistaken for one.
+  [/(^\s*|:\s+|^\s*-\s+)[&*][A-Za-z0-9_-]+(\s|$)/, 'anchors and aliases'],
+  [/(^\s*|:\s+|^\s*-\s+)!!?[A-Za-z]/, 'tags'],
   [/:\s*[|>][-+0-9]*\s*$/, 'block scalars (| and >)'],
 ];
 

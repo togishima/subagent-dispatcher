@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jev Dispatch</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>&#9702;</text></svg>">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Jev Dispatch</h1>
+    <p class="subtitle" id="subtitle">loading…</p>
+  </div>
+  <div class="spacer"></div>
+  <div class="controls">
+    <label class="subtitle" for="window">Window</label>
+    <select id="window">
+      <option value="">All time</option>
+      <option value="1">Last hour</option>
+      <option value="24">Last 24 hours</option>
+      <option value="168">Last 7 days</option>
+      <option value="720">Last 30 days</option>
+    </select>
+    <label class="subtitle" for="policy">Policy</label>
+    <select id="policy"><option value="">All versions</option></select>
+    <button id="theme" title="Toggle light and dark">Theme</button>
+    <button id="refresh" title="Reload now">Refresh</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-view="overview" aria-current="true">Overview</button>
+  <button data-view="timeline">Routing timeline</button>
+  <button data-view="policy">Policy effectiveness</button>
+  <button data-view="confidence">Confidence</button>
+  <button data-view="workers">Workers</button>
+  <button data-view="cost">Cache &amp; cost</button>
+  <button data-view="compare">Compare arms</button>
+</nav>
+
+<main>
+  <section id="view-overview">
+    <div class="tiles" id="kpis"></div>
+    <div class="card">
+      <h2>Tier distribution</h2>
+      <p class="note">Which capability tier each delegation finished on. Colour runs light to dark as capability rises.</p>
+      <div class="bars" id="tier-final"></div>
+    </div>
+    <div class="card">
+      <h2>First route vs final tier</h2>
+      <p class="note">The tier the router picked first, before any escalation. A gap against the chart above is under-routing.</p>
+      <div class="bars" id="tier-first"></div>
+    </div>
+  </section>
+
+  <section id="view-timeline" hidden>
+    <div class="card">
+      <h2>Routing timeline</h2>
+      <p class="note">Newest first. Indented rows are escalations — a retry at a stronger tier after the previous attempt failed verification.</p>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </section>
+
+  <section id="view-policy" hidden>
+    <div class="card">
+      <h2>Expensive branch share</h2>
+      <p class="note">How often the policy sent a task straight to the strongest tier on its first route.</p>
+      <div class="tiles" id="policy-kpis"></div>
+    </div>
+    <div class="card">
+      <h2>Predicate effectiveness</h2>
+      <p class="note">
+        Per node: how often traversal reached it, how confident Jev was, and what happened downstream of each branch.
+        A predicate whose branches have the same outcome is not routing anything.
+      </p>
+      <div id="predicates"></div>
+    </div>
+  </section>
+
+  <section id="view-confidence" hidden>
+    <div class="card">
+      <h2>Confidence against outcome</h2>
+      <p class="note">
+        Bucketed by the weakest semantic predicate on the path that decided the route.
+        If confidence is calibrated, first-route success falls and escalation rises as confidence drops.
+      </p>
+      <div class="legend">
+        <span><i class="swatch s1"></i> First-route success</span>
+        <span><i class="swatch s2"></i> Escalation</span>
+      </div>
+      <div class="bars" id="confidence"></div>
+    </div>
+    <div class="card">
+      <h2>Table view</h2>
+      <div class="scroll"><table id="confidence-table"></table></div>
+    </div>
+  </section>
+
+  <section id="view-workers" hidden>
+    <div class="card">
+      <h2>Worker performance</h2>
+      <p class="note">One row per worker. Escalations in and out show where the tier boundaries are actually landing.</p>
+      <div class="scroll"><table id="workers"></table></div>
+    </div>
+  </section>
+
+  <section id="view-cost" hidden>
+    <div id="otel-banner"></div>
+    <div class="tiles" id="cache-kpis"></div>
+    <div class="card">
+      <h2>Main session vs subagents</h2>
+      <p class="note">
+        Token composition by request source, from Claude Code's own OpenTelemetry counters.
+        The main session's cache read ratio is the hypothesis: delegating should leave it high.
+      </p>
+      <div class="legend">
+        <span><i class="swatch s1"></i> Main session</span>
+        <span><i class="swatch s2"></i> Subagents</span>
+        <span><i class="swatch s3"></i> Auxiliary</span>
+      </div>
+      <div class="scroll"><table id="otel-table"></table></div>
+    </div>
+    <div class="card">
+      <h2>Worker spend</h2>
+      <p class="note">Measured per invocation from each worker's own result payload, not estimated.</p>
+      <div class="scroll"><table id="worker-cost"></table></div>
+    </div>
+  </section>
+
+  <section id="view-compare" hidden>
+    <div class="card">
+      <h2>Experiment arms</h2>
+      <p class="note">
+        One row per arm, scored identically. Arm A is <b>fixed-high</b>, arm B is <b>jev-direct</b>
+        (Jev classifies the tier itself), arm C is <b>policy-graph</b> (Jev answers only semantic predicates).
+      </p>
+      <div class="scroll"><table id="comparison"></table></div>
+    </div>
+    <div class="card">
+      <h2>How to run an arm</h2>
+      <p class="note">
+        Each arm writes to the same schema, so switching mode and re-running the same task set is the whole experiment.
+      </p>
+      <div class="mono" id="arm-help"></div>
+    </div>
+  </section>
+</main>
+
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+<script src="app.js" type="module"></script>
+</body>
+</html>
