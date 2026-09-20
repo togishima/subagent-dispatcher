@@ -133,7 +133,7 @@ const statusTool = {
 
 createServer({
   name: 'jev-dispatch',
-  version: '0.1.0',
+  version: '0.2.0',
   tools: [delegateTool, statusTool],
   onError: (error) => log.error('mcp tool error', { error: error.message, stack: error.stack?.split('\n')[1] }),
 });
