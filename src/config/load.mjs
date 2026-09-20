@@ -3,6 +3,7 @@ import path from 'node:path';
 import { parseYaml } from './yaml.mjs';
 import { defaultConfigPath, userConfigCandidates } from '../util/paths.mjs';
 import { PROVIDERS, providerNames, resolveProvider } from '../router/providers.mjs';
+import { pluginOptionOverrides } from './plugin-options.mjs';
 import { log } from '../util/log.mjs';
 
 export const ROUTING_MODES = [
@@ -221,8 +222,15 @@ export function loadConfig({ reload = false } = {}) {
   const base = JSON.parse(fs.readFileSync(defaultConfigPath, 'utf8'));
   delete base.$comment;
 
+  // Answers given when the plugin was enabled seed the configuration; a config
+  // file written later still overrides them.
   let merged = base;
   const sources = [];
+  const fromInstall = pluginOptionOverrides();
+  if (Object.keys(fromInstall).length > 0) {
+    merged = deepMerge(merged, fromInstall);
+    sources.push('plugin install options');
+  }
   for (const candidate of userConfigCandidates()) {
     if (!fs.existsSync(candidate)) continue;
     try {

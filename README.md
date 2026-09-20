@@ -80,11 +80,32 @@ cannot be derived is refused rather than guessed at.
 /plugin install jev-dispatch@jev-dispatch-marketplace
 ```
 
-Then set the routing credential — in your environment, never in a config file:
+Claude Code asks for the routing credential as part of enabling the plugin —
+which provider, the key, and an account ID or endpoint if the provider needs
+one. The key is masked as you type and stored in your keychain (falling back to
+`~/.claude/.credentials.json`), never in `settings.json` and never in this
+plugin's config file. Change the answers later with `/plugin`.
+
+Nothing is required at that prompt. Leave the key empty to run the fixed-tier
+baseline arms, which make no routing calls at all.
+
+If you would rather not answer prompts, the environment still works:
 
 ```bash
 export TYPESAFE_API_KEY=...        # https://typesafe.ai
 ```
+
+`doctor` names which source is in play, so there is never a question of which
+key is being used:
+
+```
+API key found — the key you entered when enabling the plugin
+API key found — environment variable TYPESAFE_API_KEY
+```
+
+Precedence runs most-specific first: a variable you named yourself in
+`routing.jev.apiKeyEnv`, then the install-time answer, then the provider's
+default variable.
 
 Jev is also served through gateways. Pick the provider and supply its key:
 
@@ -112,6 +133,10 @@ Every default a provider supplies — `endpoint`, `apiKeyEnv`, extra `headers` �
 is overridable, so a provider whose defaults are wrong is a one-line fix rather
 than a code change. `jev-dispatch providers` lists them.
 
+The provider, account ID and endpoint can also be answered at the install prompt
+instead of written here. Those answers seed the configuration; a config file
+written later overrides them.
+
 > **Confirm your provider before trusting it.** No provider shape in this build
 > has been exercised against a running service: the TypeSafe shape was read from
 > a working client, and the gateway shapes are inferred from how those gateways
@@ -134,8 +159,9 @@ Requires Node 22.5+ (for `node:sqlite`) and the `claude` CLI on `PATH`. The
 plugin itself has **no npm dependencies**.
 
 To uninstall: `/plugin uninstall jev-dispatch`. That removes the tool, the
-agents, the hooks and the MCP server. The telemetry database is left alone —
-delete it with `jev-dispatch purge --yes` if you want it gone.
+agents, the hooks, the MCP server and the stored credential. The telemetry
+database is left alone — delete it with `jev-dispatch purge --yes` if you want
+it gone.
 
 ## Set up verification first
 

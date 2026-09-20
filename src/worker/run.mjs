@@ -32,6 +32,11 @@ export function workerEnv(worker, config) {
   // who switches providers should not have to remember to revisit this.
   for (const provider of Object.values(PROVIDERS)) delete env[provider.apiKeyEnv];
   if (config.routing.jev.apiKeyEnv) delete env[config.routing.jev.apiKeyEnv];
+  // Install-time answers reach this process as CLAUDE_PLUGIN_OPTION_*, one of
+  // which is the key itself. None of them is a worker's business.
+  for (const name of Object.keys(env)) {
+    if (name.startsWith('CLAUDE_PLUGIN_OPTION_')) delete env[name];
+  }
   // Workers must not inherit the parent's telemetry export or session identity.
   env.CLAUDE_CODE_ENABLE_TELEMETRY = '0';
   env.JEV_DISPATCH_WORKER = '1';

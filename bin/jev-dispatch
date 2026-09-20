@@ -10,6 +10,7 @@ import { predicateNames } from '../src/policy/predicates.mjs';
 import { applicableChecks } from '../src/verify/index.mjs';
 import { probeProvider } from '../src/router/jev-client.mjs';
 import { PROVIDERS as PROVIDERS_FOR_HELP, resolveProvider, providerNames } from '../src/router/providers.mjs';
+import { resolveApiKey } from '../src/config/plugin-options.mjs';
 import { overview, policyComparison, exportForPolicyAuthoring } from '../src/telemetry/queries.mjs';
 import { dataDir, userConfigCandidates } from '../src/util/paths.mjs';
 
@@ -109,11 +110,17 @@ async function doctor() {
   } catch (error) {
     bad('provider', error.message);
   }
-  if (!needsJev) warn('Jev not needed', `mode ${config.routing.mode} makes no model calls to route`);
-  else if (provider && process.env[provider.apiKeyEnv]) {
-    ok(`${provider.apiKeyEnv} present`, 'not yet verified against the service — use check-router');
+  const credential = provider ? resolveApiKey(provider, config.routing.jev) : { key: null };
+  if (!needsJev) {
+    warn('Jev not needed', `mode ${config.routing.mode} makes no model calls to route`);
+    if (credential.key) ok('key present anyway', credential.source);
+  } else if (credential.key) {
+    ok('API key found', `${credential.source}; not yet verified — use check-router`);
   } else if (provider) {
-    bad(`${provider.apiKeyEnv} not set`, 'routing will degrade to the safer branch at every semantic node');
+    bad(
+      'no API key',
+      `enter one with "/plugin", or set ${provider.apiKeyEnv}; routing will otherwise degrade to the safer branch at every semantic node`,
+    );
   }
 
   console.log('\nworkers');
@@ -247,7 +254,8 @@ switch (command) {
     }
     console.log(`provider : ${provider.name} (${provider.label})`);
     console.log(`endpoint : ${provider.endpoint}`);
-    console.log(`key env  : ${provider.apiKeyEnv} ${process.env[provider.apiKeyEnv] ? '(set)' : '(NOT SET)'}`);
+    const credential = resolveApiKey(provider, config.routing.jev);
+    console.log(`key      : ${credential.key ? credential.source : `NOT SET (enter one with "/plugin", or set ${provider.apiKeyEnv})`}`);
     console.log(`model    : ${config.routing.jev.model}`);
     console.log(`shape    : ${provider.source}`);
     console.log('');
