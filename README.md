@@ -86,6 +86,44 @@ Then set the routing credential — in your environment, never in a config file:
 export TYPESAFE_API_KEY=...        # https://typesafe.ai
 ```
 
+Jev is also served through gateways. Pick the provider and supply its key:
+
+```yaml
+# Cloudflare Workers AI
+routing:
+  jev:
+    provider: cloudflare
+    accountId: "<your account id>"     # CLOUDFLARE_API_TOKEN
+    model: "@typesafe/jev-1.13.0"
+
+# Vercel AI Gateway
+routing:
+  jev:
+    provider: vercel                   # AI_GATEWAY_API_KEY
+
+# LiteLLM or any other pass-through proxy
+routing:
+  jev:
+    provider: passthrough              # JEV_API_KEY
+    endpoint: https://litellm.internal/typesafe/v1/systemone
+```
+
+Every default a provider supplies — `endpoint`, `apiKeyEnv`, extra `headers` —
+is overridable, so a provider whose defaults are wrong is a one-line fix rather
+than a code change. `jev-dispatch providers` lists them.
+
+> **Confirm your provider before trusting it.** No provider shape in this build
+> has been exercised against a running service: the TypeSafe shape was read from
+> a working client, and the gateway shapes are inferred from how those gateways
+> generally behave. `jev-dispatch check-router` makes one real request and prints
+> the raw response, which is how a provider gets confirmed. A 200 carrying no
+> answers means the endpoint or the model is wrong, and the response usually says
+> which.
+
+Responses are unwrapped by looking for the `answers` object rather than by
+assuming a particular envelope, so a gateway that wraps in `result`, `data`,
+`response` or `output` — or not at all — works without a code change.
+
 Check the installation:
 
 ```bash
@@ -479,7 +517,11 @@ routing:
       minMaxProbability: 0.6              # below this, floor the tier
       floorTier: medium
   jev:
-    endpoint: https://api.typesafe.ai/v1/systemone
+    provider: typesafe                    # typesafe | cloudflare | vercel | passthrough | custom
+    endpoint: null                        # null = the provider's default
+    apiKeyEnv: null                       # null = the provider's default
+    accountId: null                       # gateways that scope by account
+    headers: {}                           # merged in; a null value removes a default
     model: jev-latest
     timeoutMs: 8000
     sendPlan: true                        # the plan is needed to judge whether it is followable
@@ -528,6 +570,12 @@ would rather cap the cost.
   quality numbers. The dashboard reports the unverified rate for this reason.
 - **The OTel counter store is a snapshot, not a time series.** It answers "what
   is the cache read ratio", not "how did it move over the last hour".
+- **The Jev integration has not been run against a live service.** Everything
+  downstream of routing — worker execution, verification, escalation, telemetry,
+  the dashboard — was verified end to end with `fixed-*` modes, which make no
+  routing calls. The router itself is covered only by tests that stub `fetch`
+  with the wire format described above. Run `jev-dispatch check-router` first; if
+  the shape differs, `endpoint`, `headers` and `model` are all configuration.
 
 ## Commands
 
@@ -535,6 +583,8 @@ would rather cap the cost.
 jev-dispatch ui                        serve the dashboard
 jev-dispatch doctor                    check config, policy, workers, key, telemetry
 jev-dispatch route <task…>             dry-run the router and print the traversal
+jev-dispatch providers                 list the Jev providers this build knows about
+jev-dispatch check-router              make one real Jev request and print the response
 jev-dispatch policy                    print the active routing policy
 jev-dispatch predicates                list deterministic predicates
 jev-dispatch status                    headline metrics as JSON

@@ -1,4 +1,5 @@
 import { log } from '../util/log.mjs';
+import { resolveProvider, unwrapPayload, describeUnknownPayload } from './providers.mjs';
 
 /**
  * Jev client. Jev is used as a semantic predicate evaluator, not as a resource
@@ -11,6 +12,10 @@ import { log } from '../util/log.mjs';
  * Wire format (POST {endpoint}):
  *   { state, model, questions: { <id>: { type, instructions, criteria } } }
  *   -> { answers: { <id>: { noul | choice, confidence, probabilities } }, usage }
+ *
+ * Jev is also served through gateways, which vary the URL, the auth header and
+ * whether the answer arrives wrapped in an envelope. Those differences live in
+ * providers.mjs; everything below works on the unwrapped payload.
  */
 
 export class JevError extends Error {
@@ -23,34 +28,57 @@ export class JevError extends Error {
 
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504, 529]);
 
-function apiKey(jevConfig) {
-  const key = process.env[jevConfig.apiKeyEnv];
+function apiKey(provider) {
+  const key = process.env[provider.apiKeyEnv];
   if (!key) {
     throw new JevError(
-      `no Jev API key: set ${jevConfig.apiKeyEnv} in the environment (never in the config file)`,
+      `no Jev API key for ${provider.label}: set ${provider.apiKeyEnv} in the environment (never in the config file)`,
     );
   }
   return key;
 }
 
-async function post(jevConfig, body, externalSignal) {
-  const key = apiKey(jevConfig);
+/**
+ * POST a Jev request and return the unwrapped payload.
+ *
+ * `raw` is returned alongside so a diagnostic command can show exactly what came
+ * back — the gateway shapes here are inferred, and being able to see the real
+ * response is the difference between fixing a config line and guessing.
+ */
+export async function post(jevConfig, body, externalSignal) {
+  const provider = resolveProvider(jevConfig);
+  const key = apiKey(provider);
+  const headers = provider.buildHeaders(key);
+  const payload = provider.buildBody(body);
   let lastError;
+
   for (let attempt = 0; attempt < Math.max(1, jevConfig.maxRetries); attempt += 1) {
     const timeout = AbortSignal.timeout(jevConfig.timeoutMs);
     const signal = externalSignal ? AbortSignal.any([timeout, externalSignal]) : timeout;
     try {
-      const response = await fetch(jevConfig.endpoint, {
+      const response = await fetch(provider.endpoint, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        headers,
+        body: JSON.stringify(payload),
         signal,
       });
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        throw new JevError(`TypeSafe ${response.status}: ${detail.slice(0, 300)}`, response.status);
+        throw new JevError(`${provider.label} ${response.status}: ${detail.slice(0, 300)}`, response.status);
       }
-      return await response.json();
+      const raw = await response.json();
+      const unwrapped = unwrapPayload(raw);
+      if (!unwrapped) {
+        // A 200 with no `answers` anywhere usually means the endpoint is wrong or
+        // the gateway rejected the request in its own envelope. Say which.
+        throw new JevError(
+          `${provider.label} returned no Jev answers: ${describeUnknownPayload(raw)}. ` +
+            `Check routing.jev.endpoint and routing.jev.model, or run "jev-dispatch check-router" to see the full response.`,
+        );
+      }
+      unwrapped.$raw = raw;
+      unwrapped.$provider = provider.name;
+      return unwrapped;
     } catch (error) {
       lastError = error;
       const status = error instanceof JevError ? error.status : undefined;
@@ -60,6 +88,38 @@ async function post(jevConfig, body, externalSignal) {
     }
   }
   throw lastError instanceof JevError ? lastError : new JevError(String(lastError?.message ?? lastError));
+}
+
+/**
+ * One live request against the configured provider, for diagnostics. Returns the
+ * raw response so a wrong endpoint or envelope can be seen rather than guessed.
+ */
+export async function probeProvider(jevConfig, signal) {
+  const provider = resolveProvider(jevConfig);
+  const started = Date.now();
+  const body = {
+    state: { subtask: 'Rename a local variable from `tmp` to `total` in one function.' },
+    model: jevConfig.model,
+    questions: {
+      probe_mechanical: {
+        type: 'noul',
+        instructions: 'Is this subtask a single mechanical edit with no design decision left open?',
+        criteria: { true: 'A direct, well-specified edit.', false: 'Judgement is required.' },
+      },
+    },
+  };
+  const payload = await post(jevConfig, body, signal);
+  return {
+    provider: provider.name,
+    label: provider.label,
+    endpoint: provider.endpoint,
+    apiKeyEnv: provider.apiKeyEnv,
+    source: provider.source,
+    latencyMs: Date.now() - started,
+    answer: payload.answers?.probe_mechanical ?? null,
+    usage: payload.usage ?? null,
+    raw: payload.$raw,
+  };
 }
 
 const finite = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
