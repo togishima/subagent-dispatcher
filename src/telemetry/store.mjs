@@ -149,9 +149,9 @@ export class TelemetryStore {
         json(decision.probabilities),
         json(decision.trail.map((step) => ({ node: step.nodeId, branch: step.branch, tier: step.tier }))),
         decision.routingLatencyMs,
-        decision.jevLatencyMs,
-        decision.jevUsage?.input_tokens ?? 0,
-        decision.jevUsage?.output_tokens ?? 0,
+        decision.evaluatorLatencyMs ?? null,
+        decision.evaluatorUsage?.input_tokens ?? 0,
+        decision.evaluatorUsage?.output_tokens ?? 0,
         bool(decision.degraded),
         safeFailureDetail(decision.error),
       );

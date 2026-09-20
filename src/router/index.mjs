@@ -1,7 +1,8 @@
 import { loadPolicy, semanticNodes } from '../policy/graph.mjs';
 import { traverse, pathConfidence } from '../policy/traverse.mjs';
 import { buildRoutingState } from './state.mjs';
-import { evaluateSemanticPredicates, classifyTierDirectly, JevError } from './jev-client.mjs';
+import { classifyTierDirectly } from './jev-client.mjs';
+import { createEngine } from './engines/index.mjs';
 import { orderedTiers } from '../config/load.mjs';
 import { log } from '../util/log.mjs';
 
@@ -11,7 +12,8 @@ import { log } from '../util/log.mjs';
  *   interface Router { route(input): Promise<RouteDecision> }
  *
  * Three implementations ship, and they are the three arms of the experiment:
- *   policy-graph  deterministic graph, Jev answers only semantic predicates (C)
+ *   policy-graph  deterministic graph; a semantic engine answers only its
+ *                 boolean predicates, and which engine is a separate setting
  *   jev-direct    Jev classifies the tier in one choice question             (B)
  *   fixed         always one tier, the baseline                             (A)
  *
@@ -48,8 +50,11 @@ function decision(fields) {
     trail: fields.trail ?? [],
     semanticEvaluations: fields.semanticEvaluations ?? [],
     routingLatencyMs: fields.routingLatencyMs ?? 0,
-    jevLatencyMs: fields.jevLatencyMs ?? null,
-    jevUsage: fields.jevUsage ?? null,
+    // Who answered the semantic predicates, and what it cost. Named for the role
+    // rather than for Jev, which is now one engine among several.
+    evaluator: fields.evaluator ?? null,
+    evaluatorLatencyMs: fields.evaluator?.latencyMs ?? null,
+    evaluatorUsage: fields.evaluator?.usage ?? null,
     reason: fields.reason,
     degraded: fields.degraded ?? false,
     error: fields.error ?? null,
@@ -62,35 +67,44 @@ registerRouter('policy-graph', (config) => {
   const policy = loadPolicy(config);
   const semantic = semanticNodes(policy);
   const options = config.routing.policyGraph;
+  // The graph does not know which engine answers its questions, and must not:
+  // the same answers have to produce the same tier whoever supplied them.
+  const engine = createEngine(config);
 
   return {
     mode: 'policy-graph',
     policy,
+    engine,
+    close: () => engine.close?.(),
     async route(input) {
       const started = Date.now();
       let answers = {};
-      let jevLatencyMs = null;
-      let jevUsage = null;
+      let evaluator = null;
       let error = null;
       let degraded = false;
 
       if (semantic.length > 0) {
         try {
-          const state = buildRoutingState(input, config.routing.jev);
-          const result = await evaluateSemanticPredicates(semantic, state, config.routing.jev, input.signal);
+          const state = buildRoutingState(input, engine.stateOptions());
+          const result = await engine.evaluate({ state, predicates: semantic, signal: input.signal });
           answers = result.answers;
-          jevLatencyMs = result.latencyMs;
-          jevUsage = result.usage;
+          evaluator = result;
         } catch (cause) {
-          // Jev being unavailable must not stop a delegation. Traversal then takes
-          // the safer branch at every semantic node, which over-routes by design.
-          error = cause instanceof JevError ? cause.message : String(cause?.message ?? cause);
+          // An engine being unavailable must not stop a delegation, and must not
+          // change which way uncertainty falls. Traversal then takes the safer
+          // branch at every semantic node, which over-routes by design — a local
+          // engine crashing is no more a reason to under-route than a remote one
+          // timing out.
+          error = String(cause?.message ?? cause);
           degraded = true;
-          log.warn('jev unavailable, traversing policy with safer branches', { error });
+          log.warn('semantic evaluator unavailable, traversing policy with safer branches', {
+            engine: engine.name,
+            error,
+          });
         }
       }
 
-      // A Jev outage otherwise sends every task to the safest branch, which for a
+      // An outage otherwise sends every task to the safest branch, which for a
       // policy that ends in HIGH means every task becomes a frontier task. Deployments
       // that would rather cap the blast radius can fall back to a fixed tier instead.
       if (degraded && options.onEvaluatorUnavailable === 'fallback-tier') {
@@ -99,7 +113,7 @@ registerRouter('policy-graph', (config) => {
           policyVersion: policy.version,
           requiredTier: config.routing.fallbackTierOnRouterError,
           routingLatencyMs: Date.now() - started,
-          jevLatencyMs,
+          evaluator: { engine: engine.name, latencyMs: null, usage: null, model: null },
           reason: 'router-error-fallback',
           degraded: true,
           error,
@@ -117,7 +131,7 @@ registerRouter('policy-graph', (config) => {
           confidence: answer?.confidence ?? null,
           probabilities: answer?.probabilities ?? null,
           used: Boolean(step),
-          // A used step can differ from Jev's answer when the confidence floor
+          // A used step can differ from the engine's answer when the confidence floor
           // forced the safer branch; both are kept so policies can be re-scored.
           branchTaken: step?.branch ?? null,
           uncertain: step?.uncertain ?? null,
@@ -133,8 +147,7 @@ registerRouter('policy-graph', (config) => {
         trail: walk.trail,
         semanticEvaluations: evaluations,
         routingLatencyMs: Date.now() - started,
-        jevLatencyMs,
-        jevUsage,
+        evaluator: evaluator ?? { engine: engine.name, latencyMs: null, usage: null, model: null },
         reason: degraded ? 'policy-graph-degraded' : walk.reason,
         degraded,
         error,
@@ -152,7 +165,10 @@ registerRouter('jev-direct', (config) => {
     async route(input) {
       const started = Date.now();
       try {
-        const state = buildRoutingState(input, config.routing.jev);
+        const state = buildRoutingState(input, {
+          sendPlan: config.routing.jev.sendPlan !== false,
+          maxPlanChars: config.routing.jev.maxPlanChars ?? 4000,
+        });
         const result = await classifyTierDirectly(state, config.tiers, config.routing.jev, input.signal);
 
         let tier = result.tier;
@@ -172,8 +188,10 @@ registerRouter('jev-direct', (config) => {
           confidence: result.maxProbability,
           probabilities: result.probabilities,
           routingLatencyMs: Date.now() - started,
-          jevLatencyMs: result.latencyMs,
-          jevUsage: result.usage,
+          evaluator: {
+            engine: 'jev-direct', model: config.routing.jev.model ?? null,
+            latencyMs: result.latencyMs, usage: result.usage, metadata: null,
+          },
           reason,
         });
       } catch (cause) {
