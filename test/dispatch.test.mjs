@@ -47,6 +47,46 @@ test('infrastructure problems are not capability failures', () => {
   );
 });
 
+test('a passing check outranks a worker that under-reports its own work', () => {
+  // Found in real use: a worker did the job correctly but reported "failed",
+  // and the self-report escalated verified-good work to a costlier tier.
+  const result = classifyAttempt(
+    attempt({
+      execution: { output: { status: 'failed', blockers: ['not sure I finished'], changedFiles: ['a.ts'] } },
+      verification: { verdict: VERDICT.PASS, reason: '1 check(s) passed' },
+    }),
+  );
+  assert.equal(result.success, true, 'a deterministic PASS is the verdict');
+  assert.equal(result.failureReason, null);
+  assert.equal(result.selfReportMismatch, true, 'the disagreement is still recorded');
+});
+
+test('a worker agreeing with a passing check is not flagged as a mismatch', () => {
+  assert.equal(classifyAttempt(attempt()).selfReportMismatch, false);
+});
+
+test('a failing check still outranks a worker claiming success', () => {
+  const result = classifyAttempt(
+    attempt({
+      execution: { output: { status: 'completed', blockers: [], changedFiles: ['a.ts'] } },
+      verification: { verdict: VERDICT.FAIL, reason: 'tests failed' },
+    }),
+  );
+  assert.equal(result.success, false);
+  assert.equal(result.failureReason, FAILURE.CAPABILITY);
+});
+
+test('with no check to judge it, the self-report is all there is', () => {
+  const result = classifyAttempt(
+    attempt({
+      execution: { output: { status: 'failed', blockers: ['could not work out the API'], changedFiles: [] } },
+      verification: { verdict: VERDICT.UNCERTAIN, reason: 'no check applies' },
+    }),
+  );
+  assert.equal(result.success, false);
+  assert.equal(result.failureReason, FAILURE.CAPABILITY);
+});
+
 test('an unusable specification does not escalate', () => {
   const result = classifyAttempt(
     attempt({ execution: { output: { status: 'needs_clarification', blockers: ['which endpoint?'], changedFiles: [] } } }),

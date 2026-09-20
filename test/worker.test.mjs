@@ -18,7 +18,7 @@ test('a worker cannot recurse back into delegate', () => {
   // No MCP servers reach the worker, and it has no Agent tool to spawn more.
   assert.ok(args.includes('--strict-mcp-config'));
   const disallowed = args[args.indexOf('--disallowedTools') + 1];
-  for (const tool of ['Task', 'Agent', 'mcp__jev-dispatch__delegate']) {
+  for (const tool of ['Task', 'Agent', 'mcp__jev-dispatch__delegate', 'mcp__plugin_jev-dispatch_jev-dispatch__delegate']) {
     assert.ok(disallowed.includes(tool), `${tool} should be disallowed`);
   }
 });

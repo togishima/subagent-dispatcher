@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS executions (
   success               INTEGER,
   num_turns             INTEGER,
   schema_honoured       INTEGER,
+  self_report_mismatch  INTEGER DEFAULT 0,
   verification_verdict  TEXT,
   verification_detail   TEXT,
   failure_reason        TEXT,

@@ -23,7 +23,7 @@ const json = (value) => (value == null ? null : JSON.stringify(value));
  * Built on node:sqlite so the whole plugin stays dependency-free.
  */
 export class TelemetryStore {
-  constructor(config, file = dbPath(config)) {
+  constructor(config, file = dbPath(config), { prune = true } = {}) {
     this.config = config;
     this.file = file;
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -32,7 +32,9 @@ export class TelemetryStore {
     this.db
       .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run('schema_version', SCHEMA_VERSION);
-    this.pruneOldData();
+    // Pruning scans the whole table, so short-lived openers (the per-subagent
+    // hook) skip it and leave retention to session boundaries.
+    if (prune) this.pruneOldData();
   }
 
   close() {
@@ -175,17 +177,17 @@ export class TelemetryStore {
         `INSERT INTO executions (
            task_id, attempt, dispatch_id, started_at, duration_ms, tier, worker, worker_kind,
            worker_model, worker_session_id, status, success, num_turns, schema_honoured,
-           verification_verdict, verification_detail, failure_reason, failure_detail,
-           changed_files_count, exit_code, timed_out,
+           self_report_mismatch, verification_verdict, verification_detail, failure_reason,
+           failure_detail, changed_files_count, exit_code, timed_out,
            cost_usd, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         taskId, attempt, dispatchId, execution.startedAt, execution.durationMs, tier,
         execution.worker, execution.workerKind, execution.workerModel, execution.workerSessionId,
         execution.output.status, bool(outcome.success), execution.usage.numTurns,
-        bool(execution.output.schemaHonoured), verification.verdict,
-        safeVerificationDetail(verification), outcome.failureReason,
+        bool(execution.output.schemaHonoured), bool(outcome.selfReportMismatch),
+        verification.verdict, safeVerificationDetail(verification), outcome.failureReason,
         safeFailureDetail(outcome.detail), execution.output.changedFiles.length,
         execution.exitCode, bool(execution.timedOut),
         execution.usage.costUsd, execution.usage.inputTokens, execution.usage.outputTokens,

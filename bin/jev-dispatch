@@ -8,7 +8,7 @@ import { createRouter } from '../src/router/index.mjs';
 import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
 import { predicateNames } from '../src/policy/predicates.mjs';
 import { applicableChecks } from '../src/verify/index.mjs';
-import { overview, policyComparison } from '../src/telemetry/queries.mjs';
+import { overview, policyComparison, exportForPolicyAuthoring } from '../src/telemetry/queries.mjs';
 import { dataDir, userConfigCandidates } from '../src/util/paths.mjs';
 
 const [command, ...rest] = process.argv.slice(2);
@@ -25,6 +25,7 @@ const USAGE = `jev-dispatch — Jev-powered subagent scheduler
   config set <key> <value>  Write one dotted key into the user config
   policy                    Print the active routing policy
   predicates                List the deterministic predicates a policy may use
+  export [--since <hours>]  Dump historical routing decisions for offline policy authoring
   purge [--yes]             Delete the telemetry database
 `;
 
@@ -257,6 +258,14 @@ switch (command) {
   case 'predicates':
     for (const name of predicateNames()) console.log(name);
     break;
+  case 'export': {
+    const store = openStore(config);
+    const sinceIndex = rest.indexOf('--since');
+    const since = sinceIndex === -1 ? null : Date.now() - Number(rest[sinceIndex + 1]) * 3_600_000;
+    process.stdout.write(`${JSON.stringify(exportForPolicyAuthoring(store, { since }), null, 2)}\n`);
+    store.close();
+    break;
+  }
   case 'purge': {
     const store = openStore(config);
     const file = store.file;

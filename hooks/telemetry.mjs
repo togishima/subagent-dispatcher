@@ -35,7 +35,9 @@ let store = null;
 let config = null;
 try {
   config = loadConfig();
-  store = new TelemetryStore(config);
+  // Only session boundaries pay for the retention scan.
+  const prune = event === 'SessionStart' || event === 'SessionEnd';
+  store = new TelemetryStore(config, undefined, { prune });
 
   switch (event) {
     case 'SessionStart':

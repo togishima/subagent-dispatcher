@@ -63,14 +63,27 @@ export function classifyAttempt({ execution, verification, config }) {
   }
 
   if (verification.verdict === VERDICT.FAIL) {
-    // A check failed. If the worker also never claimed success, or produced no
-    // change at all, that is a capability failure; if it did work and the check
-    // still fails, that is also capability. Either way a stronger worker is the
-    // remedy, which is what makes FAIL the escalation trigger.
+    // A check failed. Whether or not the worker claimed success, a stronger
+    // worker is the remedy, which is what makes FAIL the escalation trigger.
     return {
       success: false,
       failureReason: FAILURE.CAPABILITY,
       detail: verification.reason,
+    };
+  }
+
+  // A deterministic check that passed outranks the worker's opinion of its own
+  // work, including a worker that under-reports. This ordering matters: judging
+  // a verified-good result by the self-report escalates work that was already
+  // correct, which is the exact waste this project exists to measure. The
+  // disagreement is still recorded, because a worker that habitually
+  // under-reports is expensive in its own right.
+  if (verification.verdict === VERDICT.PASS) {
+    return {
+      success: true,
+      failureReason: null,
+      detail: verification.reason,
+      selfReportMismatch: output.status !== 'completed',
     };
   }
 
@@ -85,8 +98,6 @@ export function classifyAttempt({ execution, verification, config }) {
       detail: blocker.slice(0, 400) || output.summary?.slice(0, 400) || 'worker reported failure',
     };
   }
-
-  if (verification.verdict === VERDICT.PASS) return { success: true, failureReason: null, detail: verification.reason };
 
   // Worker claims completion and nothing could check it. Whether that counts is
   // an experiment parameter, not a truth: `uncertainCountsAsPass` decides.

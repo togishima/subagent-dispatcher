@@ -61,9 +61,10 @@ function sendJson(response, status, body) {
 
 function serveStatic(response, urlPath) {
   const relative = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  const file = path.join(uiDir, relative);
-  // Refuse anything that escapes the ui directory.
-  if (!path.resolve(file).startsWith(path.resolve(uiDir) + path.sep) && path.resolve(file) !== path.resolve(uiDir, 'index.html')) {
+  const file = path.resolve(uiDir, relative);
+  // Refuse anything that escapes the ui directory, even though URL parsing has
+  // already normalised `..` away.
+  if (!file.startsWith(path.resolve(uiDir) + path.sep)) {
     response.writeHead(403).end('forbidden');
     return;
   }

@@ -8,8 +8,9 @@ import { orderedTiers } from '../config/load.mjs';
 
 const ratio = (numerator, denominator) => (denominator > 0 ? numerator / denominator : null);
 
-function windowClause(sinceMs) {
-  return sinceMs ? { sql: ' AND created_at >= ?', params: [sinceMs] } : { sql: '', params: [] };
+/** An optional time window, on a named table alias so joined queries can use it. */
+function windowClause(sinceMs, column = 'created_at') {
+  return sinceMs ? { sql: ` AND ${column} >= ?`, params: [sinceMs] } : { sql: '', params: [] };
 }
 
 /** Only finished delegations are scored; an in-flight one has no outcome yet. */
@@ -167,12 +168,12 @@ const CONFIDENCE_BUCKETS = [
  * threshold policy would act on.
  */
 export function confidenceView(store, { since = null } = {}) {
-  const win = windowClause(since);
+  const win = windowClause(since, 'g.created_at');
   const rows = store.query(
     `SELECT d.confidence AS confidence, g.final_success, g.first_route_success, g.escalated
      FROM dispatches d
      JOIN delegations g ON g.task_id = d.task_id
-     WHERE d.attempt = 1 AND d.confidence IS NOT NULL AND g.finished_at IS NOT NULL${win.sql.replace(/created_at/g, 'g.created_at')}`,
+     WHERE d.attempt = 1 AND d.confidence IS NOT NULL AND g.finished_at IS NOT NULL${win.sql}`,
     win.params,
   );
   return CONFIDENCE_BUCKETS.map((bucket) => {
@@ -397,4 +398,81 @@ export function policyVersionsSeen(store) {
   return store
     .query('SELECT DISTINCT policy_version FROM delegations WHERE policy_version IS NOT NULL ORDER BY policy_version')
     .map((row) => row.policy_version);
+}
+
+/**
+ * The dataset for offline policy authoring.
+ *
+ * Runtime routing and policy improvement are deliberately separate: a frontier
+ * model designs the policy graph once, offline, from this export; it never runs
+ * in the routing path. Every row is one delegation with the traversal that
+ * produced it and the outcome that followed, which is what a policy needs to be
+ * re-scored against decisions it did not make.
+ *
+ * Task text is not included — only the hash and, if the operator kept them, the
+ * sanitized title.
+ */
+export function exportForPolicyAuthoring(store, { since = null, limit = 5000 } = {}) {
+  const win = since ? ' AND created_at >= ?' : '';
+  const params = since ? [since] : [];
+  const delegations = store.query(
+    `SELECT task_id, created_at, routing_mode, policy_version, router, task_hash, title, task_type,
+            attempt_count, first_route_tier, final_tier, final_worker, first_route_success,
+            final_status, final_success, unverified, escalated, frontier_used, final_failure_reason,
+            total_cost_usd, routing_latency_ms
+     FROM delegations WHERE ${FINISHED}${win} ORDER BY created_at DESC LIMIT ?`,
+    [...params, limit],
+  );
+  if (delegations.length === 0) return { delegations: [], tiers: orderedTiers(store.config) };
+
+  const ids = delegations.map((row) => row.task_id);
+  const placeholders = ids.map(() => '?').join(',');
+  const byTask = (rows) => {
+    const map = new Map(ids.map((id) => [id, []]));
+    for (const row of rows) map.get(row.task_id)?.push(row);
+    return map;
+  };
+
+  const predicates = byTask(
+    store.query(
+      `SELECT task_id, attempt, node_id, type, predicate, result, answered, confidence,
+              probabilities, threshold, used, uncertain, order_index
+       FROM predicate_evaluations WHERE task_id IN (${placeholders}) ORDER BY attempt, order_index`,
+      ids,
+    ),
+  );
+  const executions = byTask(
+    store.query(
+      `SELECT task_id, attempt, tier, worker, status, success, verification_verdict,
+              failure_reason, duration_ms, cost_usd, changed_files_count
+       FROM executions WHERE task_id IN (${placeholders}) ORDER BY attempt`,
+      ids,
+    ),
+  );
+  const escalations = byTask(
+    store.query(
+      `SELECT task_id, attempt, from_tier, to_tier, reason FROM escalations WHERE task_id IN (${placeholders}) ORDER BY attempt`,
+      ids,
+    ),
+  );
+
+  return {
+    exportedAt: new Date().toISOString(),
+    tiers: orderedTiers(store.config).map((tier) => ({
+      name: tier,
+      description: store.config.tiers[tier].description,
+      frontier: Boolean(store.config.workers[store.config.tiers[tier].worker]?.frontier),
+    })),
+    delegations: delegations.map((row) => ({
+      ...row,
+      predicates: (predicates.get(row.task_id) ?? []).map((entry) => ({
+        ...entry,
+        probabilities: entry.probabilities ? JSON.parse(entry.probabilities) : null,
+        used: Boolean(entry.used),
+        uncertain: Boolean(entry.uncertain),
+      })),
+      executions: executions.get(row.task_id) ?? [],
+      escalations: escalations.get(row.task_id) ?? [],
+    })),
+  };
 }

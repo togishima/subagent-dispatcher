@@ -49,7 +49,11 @@
     "strictMcpConfig": true,
     "timeoutMs": 900000,
     "allowedTools": [],
-    "disallowedTools": ["Task", "Agent", "mcp__jev-dispatch__delegate"],
+    "disallowedTools": [
+      "Task", "Agent",
+      "mcp__jev-dispatch__delegate",
+      "mcp__plugin_jev-dispatch_jev-dispatch__delegate"
+    ],
     "extraArgs": [],
     "passEnv": [
       "PATH", "HOME", "LANG", "LC_ALL", "TERM", "SHELL", "USER", "LOGNAME", "TMPDIR",
