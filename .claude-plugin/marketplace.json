@@ -1,0 +1,11 @@
+{
+  "name": "jev-dispatch-marketplace",
+  "owner": { "name": "togishima" },
+  "plugins": [
+    {
+      "name": "jev-dispatch",
+      "source": ".",
+      "description": "Jev-powered subagent scheduler: capability-tier routing, verification, escalation, local telemetry dashboard."
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*jev.dispatch.*__delegate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-sqlite \"${CLAUDE_PLUGIN_ROOT}/hooks/brief-check.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-sqlite \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-sqlite \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-sqlite \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node --experimental-sqlite \"${CLAUDE_PLUGIN_ROOT}/hooks/telemetry.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
