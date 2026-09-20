@@ -15,7 +15,7 @@ const withMock = (answers, extra = {}) =>
   testConfig({ routing: { semanticEvaluator: { provider: 'mock', mock: { answers, ...extra } } } });
 
 test('the registry names the engines, and jev is the default', () => {
-  assert.deepEqual(engineNames().sort(), ['jev', 'mock']);
+  assert.deepEqual(engineNames().sort(), ['jev', 'laya', 'mock']);
   // An absent setting must keep the original behaviour.
   assert.equal(createEngine(testConfig()).name, 'jev');
 });

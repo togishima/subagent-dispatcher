@@ -1,5 +1,6 @@
 import { createJevEngine } from './jev.mjs';
 import { createMockEngine } from './mock.mjs';
+import { createLayaEngine } from './laya.mjs';
 
 /**
  * Semantic decision engines.
@@ -29,6 +30,7 @@ export function registerEngine(name, factory) {
 }
 
 registerEngine('jev', createJevEngine);
+registerEngine('laya', createLayaEngine);
 registerEngine('mock', createMockEngine);
 
 export const engineNames = () => [...ENGINES.keys()];

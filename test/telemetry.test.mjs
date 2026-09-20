@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { sanitizeTitle, redactText, taskHash, rawTaskIfEnabled, safeFailureDetail } from '../src/telemetry/privacy.mjs';
 import { parseMetrics } from '../src/telemetry/otlp.mjs';
+import { DatabaseSync } from 'node:sqlite';
 import { TelemetryStore } from '../src/telemetry/store.mjs';
-import { overview, policyComparison, cacheCostView, confidenceView, policyView } from '../src/telemetry/queries.mjs';
+import { overview, policyComparison, cacheCostView, confidenceView, policyView, evaluatorView, predicateAgreement, evaluatorsSeen } from '../src/telemetry/queries.mjs';
 import { createTelemetryServer } from '../src/telemetry/server.mjs';
 import { redact } from '../src/util/log.mjs';
 import { testConfig, tempDir } from './helpers.mjs';
@@ -151,4 +152,137 @@ test('the dashboard refuses to leave the loopback interface', () => {
   const smuggled = { ...testConfig(), ui: { host: '0.0.0.0', port: 4319 } };
   assert.throws(() => createTelemetryServer(smuggled, store), /loopback-only/);
   store.close();
+});
+
+// --- schema 2: generic evaluator columns, added without disturbing schema 1
+
+test('evaluator telemetry is written from the decision, not from a flattened alias', () => {
+  const dir = tempDir();
+  const store = new TelemetryStore(testConfig(), path.join(dir, 't.db'));
+  store.openDelegation({ taskId: 't1', sessionId: 's', task: 'x', taskType: null, specification: {}, verificationAvailable: true });
+  store.recordDispatch({
+    taskId: 't1', attempt: 1, sessionId: 's',
+    decision: {
+      router: 'policy-graph', policyVersion: 'v2', requiredTier: 'low',
+      confidence: 0.8, probabilities: null, trail: [], semanticEvaluations: [],
+      routingLatencyMs: 40, degraded: false, error: null,
+      // Only the nested object: no evaluatorLatencyMs alias in sight.
+      evaluator: {
+        engine: 'laya', model: 'aac6fef/laya-mlx', latencyMs: 14,
+        usage: { input_tokens: 130, output_tokens: 0 },
+        metadata: { runtime: 'laya_mlx', modelLoadMs: 812, batched: true },
+      },
+    },
+    resolved: { selectedTier: 'low', worker: { name: 'haiku', model: 'haiku' }, policyReason: 'policy-graph' },
+    previousTier: null,
+  });
+
+  const row = store.queryOne('SELECT * FROM dispatches WHERE task_id = ?', ['t1']);
+  assert.equal(row.evaluator_provider, 'laya');
+  assert.equal(row.evaluator_model, 'aac6fef/laya-mlx');
+  assert.equal(row.evaluator_latency_ms, 14);
+  assert.equal(row.evaluator_input_tokens, 130);
+  assert.equal(JSON.parse(row.evaluator_metadata).modelLoadMs, 812);
+  // The version-1 columns carry the same numbers, so an older reader still works.
+  assert.equal(row.jev_latency_ms, 14);
+  assert.equal(row.jev_input_tokens, 130);
+  store.close();
+});
+
+test('evaluator comparison scores each engine on the same policy', () => {
+  const dir = tempDir();
+  const store = new TelemetryStore(testConfig(), path.join(dir, 't.db'));
+  const record = (taskId, provider, latency, success, escalated) => {
+    store.openDelegation({ taskId, sessionId: 's', task: taskId, taskType: null, specification: {}, verificationAvailable: true });
+    store.recordDispatch({
+      taskId, attempt: 1, sessionId: 's',
+      decision: {
+        router: 'policy-graph', policyVersion: 'v2', requiredTier: 'low', confidence: 0.8,
+        probabilities: null, trail: [], semanticEvaluations: [], routingLatencyMs: latency,
+        degraded: false, error: null,
+        evaluator: { engine: provider, model: 'm', latencyMs: latency, usage: null, metadata: null },
+      },
+      resolved: { selectedTier: 'low', worker: { name: 'haiku', model: 'haiku' }, policyReason: 'r' },
+      previousTier: null,
+    });
+    store.closeDelegation({
+      taskId,
+      summary: {
+        status: success ? 'completed' : 'failed', success, finalTier: 'low', finalWorker: 'haiku',
+        firstRouteSuccess: success && !escalated, unverified: false, escalated,
+        frontierUsed: false, failureReason: null,
+      },
+    });
+  };
+  record('a', 'laya', 14, true, false);
+  record('b', 'laya', 18, true, true);
+  record('c', 'jev', 190, true, false);
+
+  const view = evaluatorView(store);
+  const laya = view.find((row) => row.provider === 'laya');
+  const jev = view.find((row) => row.provider === 'jev');
+
+  assert.equal(laya.delegations, 2);
+  assert.equal(laya.local, true, 'a local engine is marked local, for the privacy column');
+  assert.equal(laya.escalation_rate, 0.5);
+  assert.equal(laya.latency.median, 18);
+  assert.equal(laya.latency.samples, 2);
+  assert.equal(jev.local, false);
+  assert.equal(jev.latency.median, 190);
+
+  // Predicate agreement groups by node and reports the spread between engines.
+  assert.deepEqual(predicateAgreement(store), []);
+  assert.deepEqual(evaluatorsSeen(store).sort(), ['jev', 'laya']);
+  store.close();
+});
+
+test('a database written before the rename opens and keeps its rows', () => {
+  // Build a real version-1 database: the old table, the old columns, a row in it.
+  const dir = tempDir();
+  const file = path.join(dir, 'legacy.db');
+  const legacy = new DatabaseSync(file);
+  legacy.exec(`
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE dispatches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, attempt INTEGER NOT NULL,
+      created_at INTEGER NOT NULL, session_id TEXT, router TEXT, routing_mode TEXT,
+      policy_version TEXT, required_tier TEXT, selected_tier TEXT, selected_worker TEXT,
+      worker_model TEXT, previous_tier TEXT, policy_reason TEXT, confidence REAL,
+      probabilities TEXT, traversal_path TEXT, routing_latency_ms INTEGER,
+      jev_latency_ms INTEGER, jev_input_tokens INTEGER DEFAULT 0,
+      jev_output_tokens INTEGER DEFAULT 0, degraded INTEGER DEFAULT 0, router_error TEXT
+    );
+    INSERT INTO meta VALUES ('schema_version', '1');
+    INSERT INTO dispatches (task_id, attempt, created_at, router, jev_latency_ms, jev_input_tokens)
+      VALUES ('old-task', 1, 1000, 'policy-graph', 212, 280);
+    INSERT INTO dispatches (task_id, attempt, created_at, router, jev_latency_ms, jev_input_tokens)
+      VALUES ('old-direct', 1, 1000, 'jev-direct', 150, 190);
+  `);
+  legacy.close();
+
+  const store = new TelemetryStore(testConfig(), file);
+
+  const columns = store.query('PRAGMA table_info(dispatches)').map((row) => row.name);
+  for (const added of ['evaluator_provider', 'evaluator_model', 'evaluator_latency_ms', 'evaluator_metadata']) {
+    assert.ok(columns.includes(added), `${added} should have been added`);
+  }
+  // The version-1 columns are kept: dropping them would discard experiment results.
+  for (const kept of ['jev_latency_ms', 'jev_input_tokens', 'jev_output_tokens']) {
+    assert.ok(columns.includes(kept), `${kept} must not be dropped`);
+  }
+  assert.equal(store.queryOne("SELECT value FROM meta WHERE key = 'schema_version'").value, '2');
+
+  // Rows written before the rename came from Jev; they are attributed rather
+  // than left unattributed and uncomparable.
+  const rows = store.query('SELECT task_id, evaluator_provider, evaluator_latency_ms, evaluator_input_tokens FROM dispatches ORDER BY task_id');
+  assert.deepEqual(rows.map((row) => row.evaluator_provider), ['jev-direct', 'jev']);
+  assert.deepEqual(rows.map((row) => row.evaluator_latency_ms), [150, 212]);
+  assert.deepEqual(rows.map((row) => row.evaluator_input_tokens), [190, 280]);
+
+  store.close();
+
+  // Opening again is a no-op, not a second migration.
+  const reopened = new TelemetryStore(testConfig(), file);
+  assert.equal(reopened.query('SELECT * FROM dispatches').length, 2);
+  reopened.close();
 });

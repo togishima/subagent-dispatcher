@@ -13,7 +13,7 @@ import {
 } from './privacy.mjs';
 
 const SCHEMA_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema.sql');
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '2';
 
 const bool = (value) => (value ? 1 : 0);
 const json = (value) => (value == null ? null : JSON.stringify(value));
@@ -29,6 +29,7 @@ export class TelemetryStore {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+    this.migrate();
     this.db
       .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run('schema_version', SCHEMA_VERSION);
@@ -39,6 +40,52 @@ export class TelemetryStore {
 
   close() {
     try { this.db.close(); } catch { /* already closed */ }
+  }
+
+  /**
+   * Additive migrations.
+   *
+   * CREATE TABLE IF NOT EXISTS leaves an existing table alone, so a database
+   * written by an earlier version has the old columns and none of the new ones.
+   * Adding them here — and only ever adding — means an old database opens and
+   * keeps its rows, which matters because those rows are experiment results.
+   */
+  migrate() {
+    const columns = new Set(this.db.prepare('PRAGMA table_info(dispatches)').all().map((row) => row.name));
+    const additions = [
+      ['evaluator_provider', 'TEXT'],
+      ['evaluator_model', 'TEXT'],
+      ['evaluator_latency_ms', 'INTEGER'],
+      ['evaluator_input_tokens', 'INTEGER DEFAULT 0'],
+      ['evaluator_output_tokens', 'INTEGER DEFAULT 0'],
+      ['evaluator_metadata', 'TEXT'],
+    ].filter(([name]) => !columns.has(name));
+
+    for (const [name, type] of additions) {
+      this.db.exec(`ALTER TABLE dispatches ADD COLUMN ${name} ${type}`);
+    }
+    // After the columns exist, never in schema.sql: on an existing database
+    // CREATE TABLE IF NOT EXISTS is a no-op, so an index over a new column
+    // would be asked for before the column was there.
+    this.db.exec('CREATE INDEX IF NOT EXISTS dispatches_evaluator ON dispatches(evaluator_provider, policy_version)');
+    if (additions.length > 0) {
+      // Rows written before the rename came from Jev; say so rather than leaving
+      // them unattributed and uncomparable.
+      //
+      // Identified by evaluator_provider IS NULL rather than by COALESCE on each
+      // field: ALTER TABLE gives existing rows the column's DEFAULT, so the token
+      // columns arrive as 0 rather than NULL and COALESCE would keep the zero.
+      this.db.exec(
+        `UPDATE dispatches SET
+           evaluator_provider = CASE WHEN router = 'jev-direct' THEN 'jev-direct'
+                                     WHEN router = 'policy-graph' THEN 'jev' END,
+           evaluator_latency_ms = jev_latency_ms,
+           evaluator_input_tokens = jev_input_tokens,
+           evaluator_output_tokens = jev_output_tokens
+         WHERE evaluator_provider IS NULL AND router IN ('policy-graph', 'jev-direct')`,
+      );
+      log.info('telemetry schema migrated', { added: additions.map(([name]) => name) });
+    }
   }
 
   /** Drop rows older than the retention window. Runs at open, like otel-agent. */
@@ -122,14 +169,24 @@ export class TelemetryStore {
 
   /** Record a routing decision and its full predicate traversal. Returns dispatch id. */
   recordDispatch({ taskId, attempt, sessionId, decision, resolved, previousTier }) {
+    // Read the evaluator from the one place that holds it. The router also
+    // exposes flattened aliases for convenience, but anything else that builds a
+    // decision — the seeder, a future replay — would have to remember to set
+    // them, and a forgotten alias shows up as a silently empty column.
+    const evaluator = decision.evaluator ?? null;
+    const evaluatorLatencyMs = evaluator?.latencyMs ?? decision.evaluatorLatencyMs ?? null;
+    const evaluatorUsage = evaluator?.usage ?? decision.evaluatorUsage ?? null;
     const info = this.db
       .prepare(
         `INSERT INTO dispatches (
            task_id, attempt, created_at, session_id, router, routing_mode, policy_version,
            required_tier, selected_tier, selected_worker, worker_model, previous_tier, policy_reason,
-           confidence, probabilities, traversal_path, routing_latency_ms, jev_latency_ms,
-           jev_input_tokens, jev_output_tokens, degraded, router_error
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           confidence, probabilities, traversal_path, routing_latency_ms,
+           jev_latency_ms, jev_input_tokens, jev_output_tokens,
+           evaluator_provider, evaluator_model, evaluator_latency_ms,
+           evaluator_input_tokens, evaluator_output_tokens, evaluator_metadata,
+           degraded, router_error
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         taskId,
@@ -149,9 +206,16 @@ export class TelemetryStore {
         json(decision.probabilities),
         json(decision.trail.map((step) => ({ node: step.nodeId, branch: step.branch, tier: step.tier }))),
         decision.routingLatencyMs,
-        decision.evaluatorLatencyMs ?? null,
-        decision.evaluatorUsage?.input_tokens ?? 0,
-        decision.evaluatorUsage?.output_tokens ?? 0,
+        // jev_* still written so a reader on schema 1 sees the same numbers.
+        evaluatorLatencyMs,
+        evaluatorUsage?.input_tokens ?? 0,
+        evaluatorUsage?.output_tokens ?? 0,
+        evaluator?.engine ?? null,
+        evaluator?.model ?? null,
+        evaluatorLatencyMs,
+        evaluatorUsage?.input_tokens ?? 0,
+        evaluatorUsage?.output_tokens ?? 0,
+        json(evaluator?.metadata ?? null),
         bool(decision.degraded),
         safeFailureDetail(decision.error),
       );
@@ -231,8 +295,8 @@ export class TelemetryStore {
       .get(taskId);
     const routing = this.db
       .prepare(
-        `SELECT COALESCE(SUM(jev_input_tokens), 0) AS jev_in,
-                COALESCE(SUM(jev_output_tokens), 0) AS jev_out,
+        `SELECT COALESCE(SUM(evaluator_input_tokens), 0) AS jev_in,
+                COALESCE(SUM(evaluator_output_tokens), 0) AS jev_out,
                 COALESCE(SUM(routing_latency_ms), 0) AS latency,
                 MIN(attempt) AS first_attempt
          FROM dispatches WHERE task_id = ?`,

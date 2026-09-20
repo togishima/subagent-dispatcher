@@ -82,9 +82,18 @@ CREATE TABLE IF NOT EXISTS dispatches (
   probabilities      TEXT,
   traversal_path     TEXT,
   routing_latency_ms INTEGER,
+  -- jev_* are schema version 1 and kept so existing databases still read. New
+  -- rows write both these and the evaluator_* columns below, which is what the
+  -- dashboard and every query use.
   jev_latency_ms     INTEGER,
   jev_input_tokens   INTEGER DEFAULT 0,
   jev_output_tokens  INTEGER DEFAULT 0,
+  evaluator_provider TEXT,
+  evaluator_model    TEXT,
+  evaluator_latency_ms   INTEGER,
+  evaluator_input_tokens INTEGER DEFAULT 0,
+  evaluator_output_tokens INTEGER DEFAULT 0,
+  evaluator_metadata TEXT,
   degraded           INTEGER DEFAULT 0,
   router_error       TEXT
 );

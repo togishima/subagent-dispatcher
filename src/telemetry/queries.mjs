@@ -540,3 +540,129 @@ export function specificationView(store, { since = null } = {}) {
     ].filter((row) => row.count > 0),
   };
 }
+
+/**
+ * Evaluator comparison: the same policy graph, different engines answering it.
+ *
+ * This is the experiment the local backend exists for. Latency is the obvious
+ * difference and the least interesting one — a 15ms evaluator that under-routes
+ * is worse than a 300ms one that does not — so routing quality sits beside it in
+ * the same row rather than in a separate view.
+ */
+export function evaluatorView(store, { since = null, policyVersion = null } = {}) {
+  const filters = ["d.attempt = 1", "d.evaluator_provider IS NOT NULL", `g.${FINISHED}`];
+  const params = [];
+  if (since) { filters.push('g.created_at >= ?'); params.push(since); }
+  if (policyVersion) { filters.push('d.policy_version = ?'); params.push(policyVersion); }
+  const where = `WHERE ${filters.join(' AND ')}`;
+
+  const rows = store.query(
+    `SELECT d.evaluator_provider AS provider,
+            COALESCE(d.evaluator_model, '—') AS model,
+            COALESCE(d.policy_version, '—') AS policy_version,
+            COUNT(*) AS delegations,
+            AVG(g.final_success) AS task_success_rate,
+            AVG(g.first_route_success) AS first_route_success_rate,
+            AVG(g.escalated) AS escalation_rate,
+            AVG(g.frontier_used) AS frontier_invocation_rate,
+            AVG(d.degraded) AS degraded_rate,
+            AVG(d.confidence) AS avg_confidence,
+            AVG(g.total_cost_usd) AS avg_delegation_cost_usd,
+            COALESCE(SUM(g.total_cost_usd), 0) AS total_cost_usd,
+            COALESCE(SUM(d.evaluator_input_tokens), 0) AS evaluator_input_tokens,
+            SUM(g.final_success) AS successes
+     FROM dispatches d
+     JOIN delegations g ON g.task_id = d.task_id
+     ${where}
+     GROUP BY d.evaluator_provider, d.evaluator_model, d.policy_version
+     ORDER BY delegations DESC`,
+    params,
+  );
+
+  // Percentiles are computed here rather than in SQL: SQLite has no percentile
+  // function, and these sets are small enough that sorting them is free.
+  const latencies = store.query(
+    `SELECT d.evaluator_provider AS provider, d.evaluator_latency_ms AS latency
+     FROM dispatches d JOIN delegations g ON g.task_id = d.task_id
+     ${where} AND d.evaluator_latency_ms IS NOT NULL`,
+    params,
+  );
+  const byProvider = new Map();
+  for (const row of latencies) {
+    if (!byProvider.has(row.provider)) byProvider.set(row.provider, []);
+    byProvider.get(row.provider).push(row.latency);
+  }
+  const percentile = (sorted, fraction) =>
+    sorted.length === 0 ? null : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+
+  return rows.map((row) => {
+    const sorted = (byProvider.get(row.provider) ?? []).slice().sort((a, b) => a - b);
+    return {
+      ...row,
+      local: row.provider === 'laya' || row.provider === 'mock',
+      costPerSuccess: ratio(row.total_cost_usd, row.successes),
+      latency: {
+        samples: sorted.length,
+        median: percentile(sorted, 0.5),
+        p95: percentile(sorted, 0.95),
+        min: sorted[0] ?? null,
+        max: sorted.at(-1) ?? null,
+      },
+    };
+  });
+}
+
+/**
+ * How two engines answered the same predicate.
+ *
+ * Not the same task — task text is not stored, so a true replay is impossible
+ * without breaking that. This compares the distribution of answers per predicate
+ * per engine, which is enough to see one engine systematically calling a
+ * predicate differently from another.
+ */
+export function predicateAgreement(store, { policyVersion = null } = {}) {
+  const filter = policyVersion ? ' AND p.policy_version = ?' : '';
+  const params = policyVersion ? [policyVersion] : [];
+  const rows = store.query(
+    `SELECT p.node_id, d.evaluator_provider AS provider,
+            COUNT(*) AS evaluations,
+            SUM(CASE WHEN p.result = 'yes' THEN 1 ELSE 0 END) AS yes_count,
+            AVG(p.confidence) AS avg_confidence,
+            SUM(p.uncertain) AS uncertain
+     FROM predicate_evaluations p
+     JOIN dispatches d ON d.id = p.dispatch_id
+     WHERE p.type = 'semantic' AND d.evaluator_provider IS NOT NULL${filter}
+     GROUP BY p.node_id, d.evaluator_provider
+     ORDER BY p.node_id, d.evaluator_provider`,
+    params,
+  );
+
+  const byNode = new Map();
+  for (const row of rows) {
+    if (!byNode.has(row.node_id)) byNode.set(row.node_id, []);
+    byNode.get(row.node_id).push({
+      provider: row.provider,
+      evaluations: row.evaluations,
+      yesRate: ratio(row.yes_count, row.evaluations),
+      averageConfidence: row.avg_confidence,
+      uncertainRate: ratio(row.uncertain, row.evaluations),
+    });
+  }
+
+  return [...byNode.entries()].map(([nodeId, providers]) => {
+    const rates = providers.filter((entry) => entry.yesRate != null).map((entry) => entry.yesRate);
+    return {
+      nodeId,
+      providers,
+      // The spread in yes-rate is the headline: a predicate where engines agree
+      // is one the policy can trust either of them on.
+      yesRateSpread: rates.length > 1 ? Math.max(...rates) - Math.min(...rates) : null,
+    };
+  });
+}
+
+export function evaluatorsSeen(store) {
+  return store
+    .query('SELECT DISTINCT evaluator_provider AS provider FROM dispatches WHERE evaluator_provider IS NOT NULL ORDER BY provider')
+    .map((row) => row.provider);
+}

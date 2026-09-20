@@ -11,6 +11,7 @@ import { applicableChecks } from '../src/verify/index.mjs';
 import { probeProvider } from '../src/router/jev-client.mjs';
 import { PROVIDERS as PROVIDERS_FOR_HELP, resolveProvider, providerNames } from '../src/router/providers.mjs';
 import { resolveApiKey } from '../src/config/plugin-options.mjs';
+import { createEngine, engineNames, selectedEngineName } from '../src/router/engines/index.mjs';
 import { overview, policyComparison, exportForPolicyAuthoring } from '../src/telemetry/queries.mjs';
 import { dataDir, userConfigCandidates } from '../src/util/paths.mjs';
 
@@ -22,6 +23,8 @@ const USAGE = `jev-dispatch — Jev-powered subagent scheduler
   doctor                    Check the installation: config, policy, worker binary, Jev key
   route <task…>             Dry-run the router on a task and print the traversal
   check-router              Make one real Jev request and print what came back
+  evaluators                List the semantic decision engines and which is selected
+  check-evaluator           Run one real evaluation through the selected engine
   providers                 List the Jev providers this build knows about
   status                    Print the experiment's headline metrics
   compare                   Print one row per experiment arm
@@ -101,7 +104,22 @@ async function doctor() {
   ok('session start nudge', config.contract?.sessionStartNudge === false ? 'off' : 'on');
 
   console.log('\nsemantic evaluator');
-  const needsJev = config.routing.mode === 'policy-graph' || config.routing.mode === 'jev-direct';
+  const engineName = selectedEngineName(config);
+  let describedEngine = null;
+  try {
+    describedEngine = createEngine(config).describe();
+    ok(`engine ${engineName}`, describedEngine.local ? 'local inference' : 'remote service');
+    ok('data leaves machine', describedEngine.dataLeavesMachine === false ? 'no' : String(describedEngine.dataLeavesMachine));
+    if (engineName === 'laya') {
+      ok('model', describedEngine.model);
+      warn('runtime not probed', 'run "jev-dispatch check-evaluator" to load the model and confirm');
+    }
+  } catch (error) {
+    bad(`engine ${engineName}`, error.message);
+  }
+  const needsJev =
+    config.routing.mode === 'jev-direct' ||
+    (config.routing.mode === 'policy-graph' && engineName === 'jev');
   let provider = null;
   try {
     provider = resolveProvider(config.routing.jev);
@@ -112,7 +130,7 @@ async function doctor() {
   }
   const credential = provider ? resolveApiKey(provider, config.routing.jev) : { key: null };
   if (!needsJev) {
-    warn('Jev not needed', `mode ${config.routing.mode} makes no model calls to route`);
+    warn('Jev not needed', `mode ${config.routing.mode} with evaluator ${engineName} makes no Jev calls`);
     if (credential.key) ok('key present anyway', credential.source);
   } else if (credential.key) {
     ok('API key found', `${credential.source}; not yet verified — use check-router`);
@@ -229,6 +247,56 @@ switch (command) {
   case 'route':
     await route(rest);
     break;
+  case 'evaluators': {
+    const selected = selectedEngineName(config);
+    for (const name of engineNames()) {
+      let described = {};
+      try {
+        described = createEngine({ ...config, routing: { ...config.routing, semanticEvaluator: { ...config.routing.semanticEvaluator, provider: name } } }).describe();
+      } catch (error) {
+        described = { error: error.message };
+      }
+      console.log(`${name === selected ? '*' : ' '} ${name.padEnd(6)} ${described.local ? 'local ' : 'remote'}  model: ${described.model ?? '—'}`);
+      console.log(`${' '.repeat(10)}data leaves machine: ${described.dataLeavesMachine === false ? 'no' : described.dataLeavesMachine ?? 'unknown'}`);
+      if (described.error) console.log(`${' '.repeat(10)}unavailable: ${described.error}`);
+    }
+    console.log('\nThe policy graph is identical whichever answers it; only who answers changes.');
+    break;
+  }
+  case 'check-evaluator': {
+    // One real evaluation through the configured engine. For Laya this also
+    // pays the model load, which is the number worth knowing before a run.
+    const engine = createEngine(config);
+    const described = engine.describe();
+    console.log(`evaluator : ${engine.name}`);
+    console.log(`model     : ${described.model ?? '—'}`);
+    console.log(`local     : ${described.local ? 'yes — the routing state stays on this machine' : 'no — the routing state is sent to the provider'}`);
+    console.log('');
+    const predicates = [
+      { id: 'probe_mechanical', question: 'Is this subtask a single mechanical edit with no design decision left open?',
+        criteria: { true: 'A direct, well-specified edit.', false: 'Judgement is required.' } },
+      { id: 'probe_cross_cutting', question: 'Does this subtask require reasoning across several modules at once?',
+        criteria: { true: 'Several components interact.', false: 'It is contained in one place.' } },
+    ];
+    const state = { subtask: 'Rename a local variable from `tmp` to `total` in one function.' };
+    try {
+      const started = Date.now();
+      const result = await engine.evaluate({ state, predicates });
+      console.log(`OK — ${predicates.length} predicates in one call, ${result.latencyMs}ms (round trip ${Date.now() - started}ms)`);
+      for (const [id, answer] of Object.entries(result.answers)) {
+        console.log(`  ${id.padEnd(22)} ${answer.result.padEnd(4)} p=${answer.probability.toFixed(3)} conf=${answer.confidence.toFixed(3)}`);
+      }
+      if (result.metadata) console.log(`  metadata: ${JSON.stringify(result.metadata)}`);
+      if (result.usage) console.log(`  usage   : ${JSON.stringify(result.usage)}`);
+    } catch (error) {
+      console.error(`FAILED: ${error.message}`);
+      console.error('Routing would still work: the policy graph takes the safer branch at every semantic node.');
+      await engine.close?.();
+      process.exit(1);
+    }
+    await engine.close?.();
+    break;
+  }
   case 'providers': {
     for (const name of providerNames()) {
       const provider = PROVIDERS_FOR_HELP[name];

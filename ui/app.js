@@ -189,7 +189,7 @@ async function renderOverview() {
         ? `vs ${usd(data.frontierBaselineCostUsd)}/task observed at top tier (n=${data.frontierBaselineSamples})`
         : 'needs top-tier runs to compare against',
     ),
-    tile('Routing latency', ms(data.averageRoutingLatencyMs), `${num(data.routingInputTokens)} Jev input tokens`),
+    tile('Routing latency', ms(data.averageRoutingLatencyMs), `${num(data.routingInputTokens)} evaluator input tokens`),
     tile('Unverified passes', pct(data.unverifiedRate, 1), 'nothing could check the result'),
   ].join('');
 
@@ -441,7 +441,8 @@ async function renderCompare() {
   $('arm-help').innerHTML = [
     'A  jev-dispatch config set routing.mode fixed-high',
     'B  jev-dispatch config set routing.mode jev-direct',
-    'C  jev-dispatch config set routing.mode policy-graph',
+    'C  jev-dispatch config set routing.mode policy-graph   (+ semanticEvaluator.provider jev)',
+    'D  jev-dispatch config set routing.semanticEvaluator.provider laya',
   ]
     .map((line) => `<div>${esc(line)}</div>`)
     .join('');
@@ -496,8 +497,91 @@ async function renderSpecification() {
   );
 }
 
+/** Local engines read the state in place; remote ones are sent it. */
+function privacyCell(local) {
+  return local
+    ? '<span class="verdict pass"><span class="icon" aria-hidden="true">\u2713</span>local · stays on this machine</span>'
+    : '<span class="verdict uncertain"><span class="icon" aria-hidden="true">\u2191</span>remote · routing state sent</span>';
+}
+
+async function renderEvaluators() {
+  const data = await get('evaluators');
+  table(
+    $('evaluators'),
+    [
+      {
+        title: 'Evaluator',
+        // Identity, model, policy and privacy in one cell: thirteen columns of
+        // equal weight is a table nobody reads across.
+        cell: (row) =>
+          `<div><b>${esc(row.provider)}</b> <span class="mono">${esc(row.policy_version)}</span></div>` +
+          `<div class="mono">${esc(row.model)}</div>` +
+          `<div>${privacyCell(row.local)}</div>`,
+      },
+      { title: 'Delegations', cell: (row) => num(row.delegations) },
+      { title: 'First-route success', cell: (row) => pct(row.first_route_success_rate, 1) },
+      { title: 'Escalation', cell: (row) => pct(row.escalation_rate, 1) },
+      { title: 'Frontier', cell: (row) => pct(row.frontier_invocation_rate, 1) },
+      { title: 'Task success', cell: (row) => pct(row.task_success_rate, 1) },
+      { title: 'Degraded', cell: (row) => pct(row.degraded_rate, 1) },
+      { title: 'Avg confidence', cell: (row) => (row.avg_confidence == null ? '—' : row.avg_confidence.toFixed(2)) },
+      { title: 'Latency', cell: (row) => `${ms(row.latency.median)}<br><span class="mono">p95 ${ms(row.latency.p95)}</span>` },
+      { title: 'Cost per success', cell: (row) => usd(row.costPerSuccess) },
+    ],
+    data.evaluators,
+    'No delegations routed by a semantic evaluator yet.',
+  );
+
+  barChart(
+    $('evaluator-latency'),
+    data.evaluators
+      .filter((row) => row.latency.median != null)
+      .map((row) => ({
+        key: row.provider,
+        value: row.latency.median,
+        colorClass: row.local ? 's3' : 's1',
+        valueLabel: `median ${ms(row.latency.median)} · p95 ${ms(row.latency.p95)}`,
+        tooltip: [
+          row.local ? 'local inference' : 'network call',
+          `${num(row.latency.samples)} samples`,
+          `min ${ms(row.latency.min)} · max ${ms(row.latency.max)}`,
+          `first-route success ${pct(row.first_route_success_rate, 1)}`,
+        ],
+      })),
+  );
+
+  const container = $('agreement');
+  if (data.agreement.length === 0) {
+    container.innerHTML = '<p class="empty">No semantic predicate evaluations recorded yet.</p>';
+    return;
+  }
+  container.innerHTML = data.agreement
+    .map((entry) => {
+      const rows = entry.providers
+        .map(
+          (provider) =>
+            `<tr><td>${esc(provider.provider)}</td><td>${num(provider.evaluations)}</td>
+             <td>${pct(provider.yesRate, 1)}</td>
+             <td>${provider.averageConfidence == null ? '—' : provider.averageConfidence.toFixed(2)}</td>
+             <td>${pct(provider.uncertainRate, 1)}</td></tr>`,
+        )
+        .join('');
+      const spread = entry.yesRateSpread == null
+        ? '<span class="predicate-kind">one evaluator only</span>'
+        : `<span class="predicate-kind">yes-rate spread <b>${pct(entry.yesRateSpread, 1)}</b></span>`;
+      return `<div class="predicate">
+        <div class="predicate-head"><span class="predicate-id">${esc(entry.nodeId)}</span>${spread}</div>
+        <div class="scroll"><table><thead><tr>
+          <th>Evaluator</th><th>Evaluations</th><th>Answered yes</th><th>Avg confidence</th><th>Uncertain</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+      </div>`;
+    })
+    .join('');
+}
+
 const RENDERERS = {
   overview: renderOverview,
+  evaluators: renderEvaluators,
   timeline: renderTimeline,
   specification: renderSpecification,
   policy: renderPolicy,
@@ -559,7 +643,8 @@ const meta = await get('meta', false);
 state.meta = meta;
 state.tiers = meta.tiers;
 $('subtitle').textContent =
-  `${meta.routingMode} · tiers ${meta.tiers.map((tier) => `${tier.name}→${tier.worker}`).join(', ')}` +
+  `${meta.routingMode} · evaluator ${meta.semanticEvaluator} · ` +
+  `tiers ${meta.tiers.map((tier) => `${tier.name}→${tier.worker}`).join(', ')}` +
   `${meta.debugStoreRawInput ? ' · raw input capture ON' : ''}`;
 for (const version of meta.policyVersions) {
   const option = document.createElement('option');
