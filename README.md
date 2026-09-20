@@ -85,8 +85,8 @@ cannot be derived is refused rather than guessed at.
 ```
 
 Claude Code asks for the routing credential as part of enabling the plugin —
-which provider, the key, and an account ID or endpoint if the provider needs
-one. The key is masked as you type and stored in your keychain (falling back to
+which provider, the key, an account ID or endpoint if the provider needs one,
+and which engine answers the policy graph's predicates. The key is masked as you type and stored in your keychain (falling back to
 `~/.claude/.credentials.json`), never in `settings.json` and never in this
 plugin's config file. Change the answers later with `/plugin`.
 

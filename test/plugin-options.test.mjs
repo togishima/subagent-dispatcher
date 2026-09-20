@@ -5,6 +5,7 @@ import { pluginOption, pluginOptionOverrides, resolveApiKey } from '../src/confi
 import { resolveProvider, PROVIDERS } from '../src/router/providers.mjs';
 import { workerEnv } from '../src/worker/run.mjs';
 import { workerForTier, loadConfig } from '../src/config/load.mjs';
+import { selectedEngineName } from '../src/router/engines/index.mjs';
 import { testConfig } from './helpers.mjs';
 
 /** Set CLAUDE_PLUGIN_OPTION_* for the duration of one test. */
@@ -28,7 +29,8 @@ test('the manifest asks for what a first run actually needs', () => {
   const manifest = JSON.parse(fs.readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'));
   const options = manifest.userConfig;
   assert.ok(options, 'plugin.json must declare userConfig, or nothing is ever asked');
-  assert.deepEqual(Object.keys(options).sort(), ['jev_account_id', 'jev_api_key', 'jev_endpoint', 'jev_provider']);
+  assert.deepEqual(Object.keys(options).sort(),
+    ['jev_account_id', 'jev_api_key', 'jev_endpoint', 'jev_provider', 'semantic_evaluator']);
 
   // The credential must be masked and kept out of settings.json.
   assert.equal(options.jev_api_key.sensitive, true);
@@ -39,12 +41,16 @@ test('the manifest asks for what a first run actually needs', () => {
     assert.ok(option.title && option.description, 'every prompt needs a label and help text');
   }
   assert.deepEqual(options.jev_provider.options, ['typesafe', 'cloudflare', 'vercel', 'passthrough', 'custom']);
+  assert.deepEqual(options.semantic_evaluator.options, ['jev', 'laya', 'mock']);
+  // No default: leaving the prompt alone must mean jev because the code says so,
+  // not because the manifest keeps restating it on every run.
+  assert.equal(options.semantic_evaluator.default, undefined);
 });
 
 test('the MCP server is handed the answers under the names the code reads', () => {
   const servers = JSON.parse(fs.readFileSync(new URL('../mcp/servers.json', import.meta.url), 'utf8'));
   const env = servers.mcpServers['jev-dispatch'].env;
-  for (const key of ['JEV_PROVIDER', 'JEV_API_KEY', 'JEV_ACCOUNT_ID', 'JEV_ENDPOINT']) {
+  for (const key of ['JEV_PROVIDER', 'JEV_API_KEY', 'JEV_ACCOUNT_ID', 'JEV_ENDPOINT', 'SEMANTIC_EVALUATOR']) {
     assert.equal(env[`CLAUDE_PLUGIN_OPTION_${key}`], `\${user_config.${key.toLowerCase()}}`);
   }
 });
@@ -68,6 +74,17 @@ test('install answers become configuration', () => {
   });
   assert.deepEqual(pluginOptionOverrides(), {});
   loadConfig({ reload: true });
+});
+
+test('the evaluator can be chosen at install, without touching a config file', () => {
+  withOptions({ semantic_evaluator: 'laya' }, () => {
+    assert.deepEqual(pluginOptionOverrides(), { routing: { semanticEvaluator: { provider: 'laya' } } });
+    assert.equal(selectedEngineName(loadConfig({ reload: true })), 'laya');
+  });
+  // Unanswered, the engine is whatever the code falls back to, and the answer
+  // contributes nothing to the configuration.
+  assert.deepEqual(pluginOptionOverrides(), {});
+  assert.equal(selectedEngineName(loadConfig({ reload: true })), 'jev');
 });
 
 test('a config file overrides what was answered at install', () => {
