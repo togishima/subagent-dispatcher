@@ -45,6 +45,16 @@
       "type": "string",
       "title": "Custom endpoint",
       "description": "Overrides the provider's default URL. Required for the passthrough and custom providers, e.g. a LiteLLM proxy; leave empty otherwise."
+    },
+    "semantic_evaluator": {
+      "type": "string",
+      "title": "Semantic evaluator",
+      "description": "Who answers the policy graph's boolean predicates. jev calls the provider above; laya runs a small model locally on Apple silicon and needs no key; mock returns fixed answers for testing. Leave empty for jev, which is the original behaviour.",
+      "options": [
+        "jev",
+        "laya",
+        "mock"
+      ]
     }
   }
 }

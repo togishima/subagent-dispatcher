@@ -13,7 +13,8 @@
         "CLAUDE_PLUGIN_OPTION_JEV_PROVIDER": "${user_config.jev_provider}",
         "CLAUDE_PLUGIN_OPTION_JEV_API_KEY": "${user_config.jev_api_key}",
         "CLAUDE_PLUGIN_OPTION_JEV_ACCOUNT_ID": "${user_config.jev_account_id}",
-        "CLAUDE_PLUGIN_OPTION_JEV_ENDPOINT": "${user_config.jev_endpoint}"
+        "CLAUDE_PLUGIN_OPTION_JEV_ENDPOINT": "${user_config.jev_endpoint}",
+        "CLAUDE_PLUGIN_OPTION_SEMANTIC_EVALUATOR": "${user_config.semantic_evaluator}"
       }
     }
   }

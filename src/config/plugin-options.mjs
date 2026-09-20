@@ -45,6 +45,11 @@ export function pluginOptionOverrides() {
   const mode = pluginOption('routing_mode');
   if (mode) overrides.mode = mode;
 
+  // Which engine answers the policy graph's predicates. Left unanswered, the
+  // code's own fallback decides, so nothing is written here.
+  const evaluator = pluginOption('semantic_evaluator');
+  if (evaluator) overrides.semanticEvaluator = { provider: evaluator };
+
   if (Object.keys(jev).length > 0) overrides.jev = jev;
   return Object.keys(overrides).length > 0 ? { routing: overrides } : {};
 }
