@@ -115,7 +115,7 @@ routing:
   jev:
     provider: cloudflare
     accountId: "<your account id>"     # CLOUDFLARE_API_TOKEN
-    model: "@typesafe/jev-1.13.0"
+    model: "typesafe/jev"               # jev-1.13.0 is what the response echoes
 
 # Vercel AI Gateway
 routing:

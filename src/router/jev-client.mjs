@@ -78,8 +78,11 @@ export async function post(jevConfig, body, externalSignal) {
             `Check routing.jev.endpoint and routing.jev.model, or run "jev-dispatch check-router" to see the full response.`,
         );
       }
-      unwrapped.$raw = raw;
-      unwrapped.$provider = provider.name;
+      // `raw` contains `unwrapped`, so attaching it as an ordinary property
+      // makes the payload circular and unserialisable. Non-enumerable keeps it
+      // reachable for diagnostics while JSON.stringify walks only the answers.
+      Object.defineProperty(unwrapped, '$raw', { value: raw, enumerable: false, configurable: true });
+      Object.defineProperty(unwrapped, '$provider', { value: provider.name, enumerable: false, configurable: true });
       return unwrapped;
     } catch (error) {
       lastError = error;
