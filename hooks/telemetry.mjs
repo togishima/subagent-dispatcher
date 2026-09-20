@@ -15,7 +15,7 @@ import { loadConfig } from '../src/config/load.mjs';
 import { TelemetryStore } from '../src/telemetry/store.mjs';
 
 const CONTRACT_NUDGE =
-  'Delegable execution subtasks in this session go through the `delegate` tool rather than being done inline; read the delegation-contract skill before the first call.';
+  'Delegable execution subtasks in this session go through the `delegate` tool rather than being done inline. Read the `delegate` skill before the first call: how completely a subtask is specified decides how well it goes.';
 
 async function readInput() {
   const chunks = [];

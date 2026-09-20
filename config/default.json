@@ -86,7 +86,8 @@
   },
 
   "contract": {
-    "sessionStartNudge": true
+    "sessionStartNudge": true,
+    "briefCheck": "advise"
   },
 
   "telemetry": {

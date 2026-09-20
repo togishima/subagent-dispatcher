@@ -88,6 +88,13 @@ async function doctor() {
     warn('policy graph not in use', `mode is ${config.routing.mode}`);
   }
 
+  console.log('\ndelegation contract');
+  const briefCheck = config.contract?.briefCheck ?? 'advise';
+  if (briefCheck === 'off') warn('brief check off', 'thin briefs will be delegated as-is');
+  else if (briefCheck === 'enforce') ok('brief check enforce', 'a thin brief is turned back once, then allowed');
+  else ok('brief check advise', 'thin briefs are delegated, with a note on what was missing');
+  ok('session start nudge', config.contract?.sessionStartNudge === false ? 'off' : 'on');
+
   console.log('\nsemantic evaluator');
   const keyName = config.routing.jev.apiKeyEnv;
   const needsJev = config.routing.mode === 'policy-graph' || config.routing.mode === 'jev-direct';

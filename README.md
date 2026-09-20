@@ -192,8 +192,29 @@ job and then reports failure.
 unconfirmed. `FAIL` means retries and escalation already happened and stronger
 workers failed too.
 
-The bundled `delegation-contract` skill explains how to scope a subtask well;
-its body loads only when the model needs it, so it costs nothing per turn.
+### Getting briefs written in the first place
+
+Two mechanisms, because they fail differently.
+
+The bundled **`delegate` skill** is the procedure: find the edit sites, write
+the plan, derive acceptance criteria, state the constraints, call the tool. Its
+body loads only when the model reaches for it, so it costs nothing per turn.
+
+But a skill is only read when the model decides to read one — and the call it
+would improve is exactly the call that gets made without reading it. So a
+**`PreToolUse` hook** fires on every delegate call and says what is missing at
+the moment it matters:
+
+```yaml
+contract:
+  briefCheck: advise    # off | advise | enforce
+```
+
+`advise` (the default) never blocks: the call proceeds with a note about what
+was missing. `enforce` turns a thin brief back **once**, with specific guidance,
+and lets the next attempt at the same subtask through whatever it looks like — a
+hook that can refuse the same work twice can trap a session, and no brief is
+worth that. Neither mode says anything when a brief is already mostly complete.
 
 ## The dashboard
 
@@ -469,6 +490,10 @@ workerDefaults:
   allowVerificationCommands: true         # let a worker run the checks that judge it
   timeoutMs: 900000
   bare: false                             # cuts worker startup cost; needs ANTHROPIC_API_KEY
+
+contract:
+  briefCheck: advise                      # off | advise | enforce; nudges thin briefs
+  sessionStartNudge: true
 
 telemetry:
   retentionDays: 100

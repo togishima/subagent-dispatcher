@@ -116,6 +116,11 @@ function validate(config) {
     }
   }
 
+  const briefCheck = config.contract?.briefCheck ?? 'advise';
+  if (!['off', 'advise', 'enforce'].includes(briefCheck)) {
+    problems.push('contract.briefCheck must be "off", "advise" or "enforce"');
+  }
+
   const policyGraph = config.routing?.policyGraph ?? {};
   const { defaultMinConfidence } = policyGraph;
   if (!(defaultMinConfidence >= 0 && defaultMinConfidence <= 1)) {
