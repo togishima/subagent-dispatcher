@@ -42,9 +42,15 @@ test('the manifest asks for what a first run actually needs', () => {
   }
   assert.deepEqual(options.jev_provider.options, ['typesafe', 'cloudflare', 'vercel', 'passthrough', 'custom']);
   assert.deepEqual(options.semantic_evaluator.options, ['jev', 'laya', 'mock']);
-  // No default: leaving the prompt alone must mean jev because the code says so,
-  // not because the manifest keeps restating it on every run.
-  assert.equal(options.semantic_evaluator.default, undefined);
+  // An option with a list of choices must also name one of them, or the plugin
+  // fails to validate and cannot be installed. The default has to be jev: it is
+  // the value default.json already carries, so an unanswered prompt restates
+  // what was true anyway instead of quietly selecting something else.
+  for (const option of Object.values(options)) {
+    if (!option.options) continue;
+    assert.ok(option.options.includes(option.default), `${option.title} defaults outside its own choices`);
+  }
+  assert.equal(options.semantic_evaluator.default, 'jev');
 });
 
 test('the MCP server is handed the answers under the names the code reads', () => {
