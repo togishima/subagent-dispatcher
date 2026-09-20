@@ -1,5 +1,6 @@
 import { log } from '../util/log.mjs';
 import { resolveProvider, unwrapPayload, describeUnknownPayload } from './providers.mjs';
+import { resolveApiKey } from '../config/plugin-options.mjs';
 
 /**
  * Jev client. Jev is used as a semantic predicate evaluator, not as a resource
@@ -28,11 +29,12 @@ export class JevError extends Error {
 
 const RETRYABLE = new Set([408, 429, 500, 502, 503, 504, 529]);
 
-function apiKey(provider) {
-  const key = process.env[provider.apiKeyEnv];
+function apiKey(provider, jevConfig) {
+  const { key } = resolveApiKey(provider, jevConfig);
   if (!key) {
     throw new JevError(
-      `no Jev API key for ${provider.label}: set ${provider.apiKeyEnv} in the environment (never in the config file)`,
+      `no Jev API key for ${provider.label}: enter one with "/plugin" (it is stored in your keychain), ` +
+        `or set ${provider.apiKeyEnv} in the environment. Never put it in the config file.`,
     );
   }
   return key;
@@ -47,7 +49,7 @@ function apiKey(provider) {
  */
 export async function post(jevConfig, body, externalSignal) {
   const provider = resolveProvider(jevConfig);
-  const key = apiKey(provider);
+  const key = apiKey(provider, jevConfig);
   const headers = provider.buildHeaders(key);
   const payload = provider.buildBody(body);
   let lastError;

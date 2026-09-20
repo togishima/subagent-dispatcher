@@ -15,5 +15,36 @@
     "jev",
     "cost"
   ],
-  "mcpServers": "./mcp/servers.json"
+  "mcpServers": "./mcp/servers.json",
+  "userConfig": {
+    "jev_provider": {
+      "type": "string",
+      "title": "Jev provider",
+      "description": "Where to reach Jev. TypeSafe is the direct API; the others are gateways. Leave as typesafe if unsure. Not needed for the fixed-tier baseline arms.",
+      "options": [
+        "typesafe",
+        "cloudflare",
+        "vercel",
+        "passthrough",
+        "custom"
+      ],
+      "default": "typesafe"
+    },
+    "jev_api_key": {
+      "type": "string",
+      "title": "Jev API key",
+      "description": "The key for the provider above. Stored in your keychain, never in settings.json or the plugin's config file. Leave empty to run the fixed-tier baselines, which make no routing calls.",
+      "sensitive": true
+    },
+    "jev_account_id": {
+      "type": "string",
+      "title": "Account ID (Cloudflare only)",
+      "description": "Your Cloudflare account ID. Only needed for the cloudflare provider; leave empty otherwise."
+    },
+    "jev_endpoint": {
+      "type": "string",
+      "title": "Custom endpoint",
+      "description": "Overrides the provider's default URL. Required for the passthrough and custom providers, e.g. a LiteLLM proxy; leave empty otherwise."
+    }
+  }
 }
