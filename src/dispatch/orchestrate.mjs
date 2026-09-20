@@ -3,6 +3,7 @@ import { resolveDispatch, nextTierForEscalation } from '../router/tier-policy.mj
 import { runWorker } from '../worker/run.mjs';
 import { verify, applicableChecks, summarizeVerification, failureExcerpt, VERDICT } from '../verify/index.mjs';
 import { classifyAttempt, FAILURE } from './classify.mjs';
+import { normalizeRequest, specificationSignals } from './request.mjs';
 import { newId } from '../util/ids.mjs';
 import { log } from '../util/log.mjs';
 
@@ -30,22 +31,18 @@ export class Dispatcher {
     const sessionId = request.sessionId ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
     const cwd = request.cwd ?? process.cwd();
 
-    const task = {
-      task: request.task,
-      contextSummary: request.context ?? null,
-      contextFiles: request.contextFiles ?? [],
-      expectedOutput: request.expectedOutput ?? null,
-      taskType: request.taskType ?? null,
-      riskFlags: request.riskFlags ?? [],
-      verification: request.verification ?? null,
-      cwd,
-    };
+    const task = normalizeRequest(request, cwd);
 
-    // Whether a deterministic check exists is a routing input, so it is computed
-    // before the first route rather than discovered after the worker has run.
-    const verificationAvailable = applicableChecks(this.config, task).length > 0;
+    // How completely the caller specified the work, and whether anything can
+    // check the result, are both routing inputs — so both are computed before
+    // the first route rather than discovered after a worker has run.
+    const specification = specificationSignals(task);
+    const checks = applicableChecks(this.config, task);
+    const verificationAvailable = checks.length > 0;
 
-    this.store?.openDelegation({ taskId, sessionId, task: task.task, taskType: task.taskType });
+    this.store?.openDelegation({
+      taskId, sessionId, task: task.task, taskType: task.taskType, specification, verificationAvailable,
+    });
 
     const maxAttempts = Math.max(1, this.config.escalation.maxAttemptsPerTask);
     const attempts = [];
@@ -57,6 +54,7 @@ export class Dispatcher {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const routingInput = {
         ...task,
+        specification,
         verificationAvailable,
         attempt,
         previousTier: previous?.tier ?? null,
@@ -82,6 +80,7 @@ export class Dispatcher {
         worker: resolved.worker,
         task: { ...task, attempt, previousFeedback: previous?.feedback ?? null },
         config: this.config,
+        checks,
       });
 
       const verification = await verify(this.config, {
@@ -109,7 +108,7 @@ export class Dispatcher {
       });
 
       if (outcome.success) {
-        return this.#finish({ taskId, attempts, escalated, status: 'completed', outcome, verification });
+        return this.#finish({ taskId, attempts, escalated, status: 'completed', outcome, verification, specification, planProblems: task.planProblems });
       }
 
       const reason = outcome.failureReason;
@@ -134,7 +133,7 @@ export class Dispatcher {
         if (!next) {
           // Already at the strongest tier: a stronger worker is not available, so
           // retrying would only repeat the same failure at the same price.
-          return this.#finish({ taskId, attempts, escalated, status: 'failed', outcome, verification });
+          return this.#finish({ taskId, attempts, escalated, status: 'failed', outcome, verification, specification, planProblems: task.planProblems });
         }
         escalatedTo = next;
         escalated = true;
@@ -154,7 +153,7 @@ export class Dispatcher {
       }
 
       const status = reason === FAILURE.SPEC ? 'needs_clarification' : 'failed';
-      return this.#finish({ taskId, attempts, escalated, status, outcome, verification });
+      return this.#finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems: task.planProblems });
     }
 
     const last = attempts[attempts.length - 1];
@@ -162,6 +161,7 @@ export class Dispatcher {
       taskId, attempts, escalated, status: 'failed',
       outcome: last?.outcome ?? { failureReason: FAILURE.UNKNOWN, detail: 'retry budget exhausted' },
       verification: { verdict: VERDICT.UNCERTAIN, reason: 'retry budget exhausted', checks: [] },
+      specification, planProblems: task.planProblems,
     });
   }
 
@@ -178,7 +178,7 @@ export class Dispatcher {
     return parts.join('\n');
   }
 
-  #finish({ taskId, attempts, escalated, status, outcome, verification }) {
+  #finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems }) {
     const last = attempts[attempts.length - 1];
     const success = status === 'completed';
     const summary = {
@@ -193,6 +193,11 @@ export class Dispatcher {
       failureReason: success ? null : outcome?.failureReason ?? null,
     };
     this.store?.closeDelegation({ taskId, summary });
+
+    // Under-specification is the caller's to fix, and the only one who can. Say
+    // so when it plausibly cost something — without naming a tier or a model,
+    // which would put the choice back in the caller's hands.
+    const hint = specificationHint({ specification, attempts, status, planProblems });
 
     // What crosses back into the main session: a summary and evidence, not a
     // transcript, and no model or tier name anywhere.
@@ -212,7 +217,43 @@ export class Dispatcher {
       escalated,
       needsClarification: status === 'needs_clarification',
       failureReason: summary.failureReason,
+      ...(hint ? { hint } : {}),
       $internal: { summary, attempts },
     };
   }
+}
+
+/**
+ * Feedback the caller can act on.
+ *
+ * A subtask that arrived as a goal rather than a brief needs someone to make
+ * the decisions, and that costs more than executing a plan does. Only the
+ * caller can fix that, so it is worth saying — but without naming a tier or a
+ * model, which would hand the capability choice back to the caller and undo the
+ * whole boundary.
+ */
+export function specificationHint({ specification, attempts, status, planProblems }) {
+  const notes = [];
+
+  if (planProblems?.length > 0) {
+    notes.push(`Some plan files could not be read and were left out: ${planProblems.join('; ')}.`);
+  }
+
+  const missing = [];
+  if (!specification?.hasPlan) missing.push('a concrete plan');
+  if (!specification?.hasEditSites) missing.push('the files to change');
+  if (!specification?.hasAcceptanceCriteria && !specification?.hasExpectedOutput) {
+    missing.push('a checkable definition of done');
+  }
+
+  // Only worth raising when the thin brief plausibly cost something: the work
+  // needed more than one attempt, or it failed outright.
+  const costSomething = attempts.length > 1 || status !== 'completed';
+  if (missing.length > 0 && costSomething) {
+    notes.push(
+      `This subtask arrived without ${missing.join(', ')}. Subtasks that carry the plan you already worked out can be executed directly instead of re-derived, which is faster and cheaper. If you delegate follow-up work here, supply what you have.`,
+    );
+  }
+
+  return notes.length > 0 ? notes.join(' ') : null;
 }

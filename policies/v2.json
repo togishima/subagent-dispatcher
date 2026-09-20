@@ -1,0 +1,113 @@
+{
+  "version": "v2",
+  "description": "Specification-aware routing. v1 asked only what the work is like; v2 asks first whether the caller already did the thinking. A concrete, checkable plan makes execution mechanical, which is the main route to the cheapest worker — and a vague brief is itself a reason to route higher, because someone still has to make the decisions.",
+  "entry": "exact_mechanical",
+  "fallbackTier": "medium",
+
+  "nodes": [
+    {
+      "id": "exact_mechanical",
+      "type": "deterministic",
+      "predicate": "task_matches",
+      "args": {
+        "patterns": [
+          "\\brename\\b", "\\btypo\\b", "\\breformat\\b", "\\bsort (the )?imports\\b",
+          "\\bbump (the )?version\\b", "\\bupdate (the )?changelog\\b",
+          "\\badd (a )?license header\\b", "\\bregenerate\\b"
+        ]
+      },
+      "comment": "A task naming an exactly mechanical operation needs no semantic judgement at all.",
+      "yes": { "goto": "verifiable" },
+      "no": { "goto": "has_brief" }
+    },
+
+    {
+      "id": "has_brief",
+      "type": "deterministic",
+      "predicate": "fully_specified",
+      "comment": "A plan, the files to change, and a checkable definition of done. Decided in code: whether these were supplied is a fact, not a judgement.",
+      "yes": { "goto": "plan_is_executable" },
+      "no": { "goto": "mechanical" }
+    },
+    {
+      "id": "plan_is_executable",
+      "type": "semantic",
+      "question": "Is the plan in `plan` concrete enough that someone unfamiliar with this codebase could carry it out by following it — naming what to change and what the result should be — without having to make design decisions of their own?",
+      "criteria": {
+        "true": "The plan states the actual steps and the intended end state. Carrying it out is a matter of applying it correctly, not of deciding what to do.",
+        "false": "The plan states a goal, a direction, or an outline whose steps still have to be worked out. Someone following it would have to choose an approach, a structure, or a set of tradeoffs."
+      },
+      "onUncertain": "no",
+      "comment": "Presence of a plan is deterministic; sufficiency is not. This is the one thing here that genuinely needs a semantic read.",
+      "yes": { "goto": "verifiable" },
+      "no": { "goto": "cross_cutting" }
+    },
+
+    {
+      "id": "mechanical",
+      "type": "semantic",
+      "question": "Is this subtask primarily mechanical and well specified — a single obvious transformation, lookup, or local edit where the desired end state is already stated and no design decision remains open?",
+      "criteria": {
+        "true": "The work is a direct, well-specified change: the request names what to do and where, and carrying it out needs no judgement about design, tradeoffs, or root cause.",
+        "false": "The work needs judgement: what to change is partly open, the request describes a goal rather than an edit, or getting it right depends on understanding surrounding code."
+      },
+      "onUncertain": "no",
+      "yes": { "goto": "verifiable" },
+      "no": { "goto": "cross_cutting" }
+    },
+
+    {
+      "id": "verifiable",
+      "type": "deterministic",
+      "predicate": "verification_available",
+      "comment": "Mechanical work is safe to send to the cheapest worker only when a deterministic check can catch a bad result.",
+      "yes": { "tier": "low" },
+      "no": { "goto": "checkable_by_criteria" }
+    },
+    {
+      "id": "checkable_by_criteria",
+      "type": "deterministic",
+      "predicate": "acceptance_criteria_provided",
+      "comment": "With no command to run, explicit acceptance criteria are the next best thing: the worker can at least check itself against them.",
+      "yes": { "tier": "low" },
+      "no": { "tier": "medium" }
+    },
+
+    {
+      "id": "cross_cutting",
+      "type": "semantic",
+      "question": "Does completing this subtask correctly require reasoning across multiple subsystems, modules, or layers of abstraction at once, rather than working within one well-bounded piece of code?",
+      "criteria": {
+        "true": "Correctness depends on how several components, layers, or call sites interact, so the work cannot be judged from one file or function alone.",
+        "false": "The work is contained within one module, file, or well-bounded unit, even if that unit is non-trivial."
+      },
+      "onUncertain": "yes",
+      "yes": { "goto": "high_stakes_judgment" },
+      "no": { "goto": "root_cause_unknown" }
+    },
+    {
+      "id": "root_cause_unknown",
+      "type": "semantic",
+      "question": "Is the root cause of the problem currently unknown, so that the subtask requires diagnosis — forming and testing hypotheses — before any fix can be written?",
+      "criteria": {
+        "true": "The request describes a symptom, a failure, or unexpected behaviour whose cause has not been identified yet.",
+        "false": "The cause is already known or the task is not a diagnosis at all; the work is to implement a change that is already understood."
+      },
+      "onUncertain": "yes",
+      "yes": { "goto": "high_stakes_judgment" },
+      "no": { "tier": "medium" }
+    },
+    {
+      "id": "high_stakes_judgment",
+      "type": "semantic",
+      "question": "Does succeeding at this subtask require high-stakes judgement — a security or privacy decision, reasoning about concurrency or data loss, or choosing between architectural tradeoffs that would be expensive to reverse?",
+      "criteria": {
+        "true": "A wrong choice here is costly or hard to undo: it touches security, authentication, privacy, concurrency, data integrity, migrations, or public interface design.",
+        "false": "A wrong choice here is cheap to correct and touches none of those concerns."
+      },
+      "onUncertain": "yes",
+      "yes": { "tier": "high" },
+      "no": { "tier": "medium" }
+    }
+  ]
+}

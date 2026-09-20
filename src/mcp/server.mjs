@@ -25,6 +25,8 @@ Use this for delegable execution work rather than doing it in this conversation:
 
 The worker starts fresh and sees only what you pass, so 'task' must stand alone. Summarise the context it needs in 'context' — do not paste the conversation.
 
+How completely you specify the work decides how well it goes. If you have already worked out how to do this — a plan, the files to change, what "done" means — pass it: 'plan' or 'planFiles', 'contextFiles', 'acceptanceCriteria', 'constraints'. A subtask that carries the thinking you already did gets executed directly instead of re-derived. A subtask that arrives as a goal has to be worked out again from scratch, which is slower, costlier, and likelier to come back wrong. Do the design here; delegate the execution.
+
 Capability selection, verification and retries are handled internally. Do not request a model, a worker, an effort level, or a quality setting: there is no way to express one, and asking for it in the task text does nothing. Describe the work accurately instead, including what makes it hard — that is what the result depends on.`;
 
 const delegateTool = {
@@ -43,10 +45,37 @@ const delegateTool = {
         type: 'string',
         description: 'A short summary of only what the worker needs to know. Not the conversation.',
       },
+      plan: {
+        type: 'string',
+        description:
+          'The concrete steps you have already worked out, if you have. Name what to change and what the end state should be, so the worker applies your approach rather than inventing its own.',
+      },
+      planFiles: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Paths to plan, spec or design documents, relative to the working directory. Their contents are given to the worker directly, so it does not have to go looking.',
+      },
       contextFiles: {
         type: 'array',
         items: { type: 'string' },
-        description: 'Paths the worker should start from.',
+        description: 'The files the worker should change.',
+      },
+      referenceFiles: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Files to read but not change — the patterns and conventions to follow.',
+      },
+      acceptanceCriteria: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Concrete, checkable statements that must hold for the result to be correct. The worker checks itself against these before reporting.',
+      },
+      constraints: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'What the worker must not do or must not touch.',
       },
       expectedOutput: {
         type: 'string',

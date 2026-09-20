@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS delegations (
   task_hash                 TEXT,
   title                     TEXT,
   task_type                 TEXT,
+  has_plan                  INTEGER DEFAULT 0,
+  plan_chars                INTEGER DEFAULT 0,
+  plan_document_count       INTEGER DEFAULT 0,
+  has_acceptance_criteria   INTEGER DEFAULT 0,
+  has_edit_sites            INTEGER DEFAULT 0,
+  has_constraints           INTEGER DEFAULT 0,
+  fully_specified           INTEGER DEFAULT 0,
+  verification_available    INTEGER DEFAULT 0,
   attempt_count             INTEGER DEFAULT 0,
   first_route_tier          TEXT,
   final_tier                TEXT,
@@ -51,6 +59,7 @@ CREATE TABLE IF NOT EXISTS delegations (
 );
 CREATE INDEX IF NOT EXISTS delegations_created ON delegations(created_at DESC);
 CREATE INDEX IF NOT EXISTS delegations_policy ON delegations(policy_version, routing_mode);
+CREATE INDEX IF NOT EXISTS delegations_spec ON delegations(fully_specified, first_route_tier);
 
 -- One row per routing decision. There is one per attempt, so escalations appear
 -- here as a second dispatch with a higher selected_tier.

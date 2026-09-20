@@ -447,9 +447,59 @@ async function renderCompare() {
     .join('');
 }
 
+async function renderSpecification() {
+  const data = await get('specification');
+  const columns = [
+    { title: 'Population', cell: (row) => `${esc(row.population)}<br><span class="mono">${esc(row.note ?? '')}</span>` },
+    { title: 'Tasks', cell: (row) => num(row.count) },
+    { title: `Routed ${esc(data.cheapestTier)}`, cell: (row) => pct(row.cheapestRouteRate, 1) },
+    { title: `Routed ${esc(data.topTier)}`, cell: (row) => pct(row.topRouteRate, 1) },
+    { title: 'Task success', cell: (row) => pct(row.taskSuccessRate, 1) },
+    { title: 'First-route success', cell: (row) => pct(row.firstRouteSuccessRate, 1) },
+    { title: 'Escalation', cell: (row) => pct(row.escalationRate, 1) },
+    { title: 'Avg attempts', cell: (row) => num(row.averageAttempts, 2) },
+    { title: 'Avg cost', cell: (row) => usd(row.averageCostUsd) },
+    { title: 'Cost per success', cell: (row) => usd(row.costPerSuccess) },
+  ];
+  table($('spec-populations'), columns, data.populations, 'No finished delegations yet.');
+
+  barChart(
+    $('spec-cheapest'),
+    // One series, one colour: the tier ramp means tiers elsewhere in this
+    // dashboard, and these bars are populations of tasks, not tiers.
+    data.populations.map((row) => ({
+      key: row.population,
+      value: row.cheapestRouteRate ?? 0,
+      colorClass: 's1',
+      valueLabel: `${pct(row.cheapestRouteRate, 1)} of ${num(row.count)}`,
+      tooltip: [
+        esc(row.note ?? ''),
+        `task success ${pct(row.taskSuccessRate, 1)}`,
+        `escalation ${pct(row.escalationRate, 1)}`,
+        `avg cost ${usd(row.averageCostUsd)}`,
+      ],
+    })),
+  );
+
+  table(
+    $('spec-signals'),
+    [
+      { title: 'Signal present', cell: (row) => esc(row.signal) },
+      { title: 'Tasks', cell: (row) => num(row.count) },
+      { title: `Routed ${esc(data.cheapestTier)}`, cell: (row) => pct(row.cheapestRouteRate, 1) },
+      { title: 'Task success', cell: (row) => pct(row.taskSuccessRate, 1) },
+      { title: 'Escalation', cell: (row) => pct(row.escalationRate, 1) },
+      { title: 'Avg cost', cell: (row) => usd(row.averageCostUsd) },
+    ],
+    data.signals,
+    'No finished delegations yet.',
+  );
+}
+
 const RENDERERS = {
   overview: renderOverview,
   timeline: renderTimeline,
+  specification: renderSpecification,
   policy: renderPolicy,
   confidence: renderConfidence,
   workers: renderWorkers,

@@ -129,16 +129,47 @@ From a Claude Code session, delegable execution work goes through the tool:
 
 ```
 delegate({
-  task: "In src/auth/session.ts, refreshToken compares `exp` in seconds against
-         Date.now() in milliseconds, so expired refresh tokens pass. Fix the
-         comparison and add a test for an expired token.",
-  context: "Tokens are minted in src/auth/mint.ts; exp is always seconds.",
-  contextFiles: ["src/auth/session.ts"],
-  expectedOutput: "An expired refresh token is rejected; a new test covers it.",
+  task: "Make LruCache in cache.mjs a real least-recently-used cache that evicts,
+         following docs/PLAN.md.",
+  planFiles: ["docs/PLAN.md"],          // the plan you already wrote
+  contextFiles: ["cache.mjs"],          // the files to change
+  referenceFiles: ["src/ttl-cache.mjs"],// patterns to follow, not change
+  acceptanceCriteria: [
+    "get() on a missing key returns undefined",
+    "set() evicts the least-recently-used key once size exceeds limit",
+    "a size getter returns the current entry count",
+  ],
+  constraints: ["do not change the constructor signature"],
+  expectedOutput: "node check.mjs prints \"all checks passed\" and exits 0.",
   taskType: "implement",
-  riskFlags: ["security"],
 })
 ```
+
+### The brief is the job
+
+This is the part that decides how well delegation works, and it is worth being
+explicit about.
+
+A worker starts from nothing. Handed a **plan**, it applies your approach —
+mechanical work, done quickly and cheaply. Handed a **goal**, it has to derive
+the approach again, which is slower, costs more, and is likelier to come back
+wrong. The reasoning to decide *how* belongs in the main session, which has the
+conversation and the context. What gets delegated is the carrying out.
+
+Concretely: the LRU cache above is not a trivial task, and a cheap worker asked
+to "make the cache an LRU" would struggle with it. Given `docs/PLAN.md` naming
+the steps, the same worker implements it correctly on the first attempt.
+
+That makes specification a routing input, not prompt decoration — and the policy
+graph reads it. Whether a plan was supplied is decided in code
+(`fully_specified`); whether the plan is actually *followable* is the one thing
+worth asking a model (`plan_is_executable`). A vague brief routes higher,
+because someone still has to make the decisions.
+
+The dashboard's **Specification** view scores this directly: complete briefs
+against thin ones, on routing, escalation, success and cost. If a better brief
+is not buying a cheaper worker, the policy is not reading specification well —
+which is a finding, and the reason the view exists.
 
 What comes back:
 
@@ -170,9 +201,9 @@ its body loads only when the model needs it, so it costs nothing per turn.
 jev-dispatch ui       # http://127.0.0.1:4319/
 ```
 
-Seven views: overview KPIs, the routing timeline (escalations shown as indented
-retries), policy effectiveness, confidence against outcome, worker performance,
-cache & cost, and the arm comparison.
+Eight views: overview KPIs, the routing timeline (escalations shown as indented
+retries), policy effectiveness, specification effectiveness, confidence against
+outcome, worker performance, cache & cost, and the arm comparison.
 
 Loopback only. A non-loopback bind address is refused outright, not merely
 defaulted away from, and nothing is ever sent anywhere.
@@ -229,7 +260,11 @@ another reason to run arm A.
 
 ## The routing policy
 
-The policy is data. `policies/v1.json`:
+The policy is data. Two versions ship: `v1` asks only what the work is like,
+`v2` (the default) asks first whether the caller already did the thinking. Both
+stay runnable so they can be compared.
+
+`policies/v2.json`, abridged:
 
 ```json
 {
@@ -259,9 +294,9 @@ anything.
 
 `type: deterministic` names a predicate from a small registry
 (`jev-dispatch predicates`). Anything ordinary code can decide safely belongs
-here rather than in a model call: verification availability, task-text patterns,
-declared task type, file counts, risk flags, previous attempts and their failure
-reasons.
+here rather than in a model call: verification availability, whether a plan and
+acceptance criteria were supplied, task-text patterns, declared task type, file
+counts, risk flags, previous attempts and their failure reasons.
 
 `type: semantic` is a question for Jev. Every semantic node in the policy goes
 out in **one** request with a shared state — TypeSafe evaluates them in
@@ -341,6 +376,12 @@ so the worker resolves it whether or not the plugin is installed in that
 directory, and nothing else from the plugin is loaded into it. Workers get no
 MCP servers and no Agent tool, so they cannot recurse back into `delegate`.
 
+A worker is permitted to run exactly the configured check commands — the same
+ones the dispatcher is about to run against it — and nothing else. Without that,
+a worker is told to verify its own work and then denied the shell to do it with,
+so it reports blind and first hears of a mistake as an escalation. Set
+`workerDefaults.allowVerificationCommands: false` to withhold it.
+
 A worker is never told which tier it is. It would calibrate its effort to its
 own price tag.
 
@@ -372,8 +413,15 @@ to, and the dispatcher stops rather than paying twice for the same failure.
 
 Local-first, and nothing leaves the machine except the routing state Jev needs.
 
-The database stores a task id, a SHA-256 hash, and an optional short sanitized
-title — not prompts, code, diffs or command output. Titles are stripped of
+Plan text is the exception worth stating plainly: judging whether a plan is
+followable means reading it, so the plan goes to Jev along with the routing
+state — truncated to `routing.jev.maxPlanChars`, and only while
+`routing.jev.sendPlan` is true. Turn it off and `plan_is_executable` degrades to
+its safer branch like any other unanswered predicate.
+
+The database stores a task id, a SHA-256 hash, an optional short sanitized
+title, and specification *flags and counts* — never the plan text, prompts,
+code, diffs or command output. Titles are stripped of
 API-key, token, JWT and email shapes; set `telemetry.storeTitles: false` to drop
 them entirely. Raw capture (`telemetry.debugStoreRawInput`, default off) is
 opt-in and still redacted, and the dashboard says so in its header when it is on.
@@ -413,9 +461,12 @@ routing:
     endpoint: https://api.typesafe.ai/v1/systemone
     model: jev-latest
     timeoutMs: 8000
+    sendPlan: true                        # the plan is needed to judge whether it is followable
+    maxPlanChars: 4000
 
 workerDefaults:
   permissionMode: acceptEdits
+  allowVerificationCommands: true         # let a worker run the checks that judge it
   timeoutMs: 900000
   bare: false                             # cuts worker startup cost; needs ANTHROPIC_API_KEY
 

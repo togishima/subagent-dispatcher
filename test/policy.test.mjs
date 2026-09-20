@@ -26,12 +26,79 @@ const GRAPH = {
 
 test('the shipped policy loads and is internally consistent', () => {
   const policy = loadPolicy(config);
-  assert.equal(policy.version, 'v1');
+  assert.equal(policy.version, 'v2');
   assert.ok(policy.nodes.size >= 4);
   assert.ok(semanticNodes(policy).length >= 1);
   for (const node of semanticNodes(policy)) {
     assert.ok(node.$safer === 'yes' || node.$safer === 'no', `${node.id} has no safer branch`);
   }
+});
+
+test('every shipped policy version validates, so v1 stays runnable for comparison', () => {
+  for (const version of ['v1', 'v2']) {
+    const policy = loadPolicy(testConfig({ routing: { policyGraph: { path: `policies/${version}.json` } } }));
+    assert.equal(policy.version, version);
+  }
+});
+
+test('v2 routes a complete brief cheaply and a bare goal expensively', () => {
+  const policy = loadPolicy(config);
+  const options = config.routing.policyGraph;
+  const brief = {
+    task: 'implement the thing',
+    verificationAvailable: true,
+    specification: { hasPlan: true, hasEditSites: true, hasAcceptanceCriteria: true },
+  };
+  // A concrete, executable plan is the route to the cheapest worker.
+  assert.equal(traverse(policy, brief, { plan_is_executable: answer('yes', 0.9) }, options).tier, 'low');
+  // The same brief with a vague plan falls through to the judgement questions.
+  assert.equal(
+    traverse(policy, brief, {
+      plan_is_executable: answer('no', 0.9),
+      cross_cutting: answer('yes', 0.9),
+      high_stakes_judgment: answer('yes', 0.9),
+    }, options).tier,
+    'high',
+  );
+  // No brief at all, and the work needs judgement: the caller left the thinking undone.
+  assert.equal(
+    traverse(policy, { task: 'make auth better', specification: { hasPlan: false } }, {
+      mechanical: answer('no', 0.9),
+      cross_cutting: answer('yes', 0.9),
+      high_stakes_judgment: answer('yes', 0.9),
+    }, options).tier,
+    'high',
+  );
+});
+
+test('v2 accepts acceptance criteria in place of a runnable check', () => {
+  const policy = loadPolicy(config);
+  const options = config.routing.policyGraph;
+  const base = { task: 'x', verificationAvailable: false, specification: { hasPlan: true, hasEditSites: true, hasAcceptanceCriteria: true } };
+  // Nothing to run, but the worker can still check itself against stated criteria.
+  assert.equal(traverse(policy, base, { plan_is_executable: answer('yes', 0.9) }, options).tier, 'low');
+  // A complete brief with neither a runnable check nor stated criteria: there is
+  // nothing to catch a bad cheap result, so it does not go to the cheapest worker.
+  const unchecked = {
+    ...base,
+    specification: { hasPlan: true, hasEditSites: true, hasExpectedOutput: true, hasAcceptanceCriteria: false },
+  };
+  assert.equal(traverse(policy, unchecked, { plan_is_executable: answer('yes', 0.9) }, options).tier, 'medium');
+});
+
+test('a brief missing its definition of done is not treated as complete', () => {
+  const policy = loadPolicy(config);
+  const options = config.routing.policyGraph;
+  // No acceptance criteria and no expected output: the caller left something open,
+  // so routing falls through to the judgement questions rather than to execution.
+  const walk = traverse(
+    policy,
+    { task: 'x', verificationAvailable: true, specification: { hasPlan: true, hasEditSites: true } },
+    { mechanical: answer('no', 0.9), cross_cutting: answer('no', 0.9), root_cause_unknown: answer('no', 0.9) },
+    options,
+  );
+  assert.equal(walk.trail.find((step) => step.nodeId === 'has_brief').result, 'no');
+  assert.equal(walk.tier, 'medium');
 });
 
 test('the safer branch is derived from reachable tiers when not declared', () => {
@@ -123,6 +190,41 @@ test('path confidence is the weakest link that decided the route', () => {
   const policy = validatePolicy(GRAPH, config);
   const walk = traverse(policy, {}, { a: answer('no', 0.91), c: answer('yes', 0.73) }, { defaultMinConfidence: 0.6 });
   assert.equal(pathConfidence(walk.trail), 0.73);
+});
+
+test('specification predicates read what the caller supplied', () => {
+  const specified = {
+    task: 'x',
+    specification: {
+      hasPlan: true, planChars: 900, hasAcceptanceCriteria: true,
+      hasEditSites: true, hasConstraints: true, hasExpectedOutput: true,
+    },
+  };
+  assert.equal(PREDICATES.plan_provided(specified, {}), true);
+  assert.equal(PREDICATES.plan_at_least(specified, { chars: 500 }), true);
+  assert.equal(PREDICATES.plan_at_least(specified, { chars: 5000 }), false);
+  assert.equal(PREDICATES.acceptance_criteria_provided(specified, {}), true);
+  assert.equal(PREDICATES.edit_sites_specified(specified, {}), true);
+  assert.equal(PREDICATES.constraints_provided(specified, {}), true);
+  assert.equal(PREDICATES.fully_specified(specified, {}), true);
+
+  const bare = { task: 'x', specification: { hasPlan: false } };
+  for (const name of ['plan_provided', 'acceptance_criteria_provided', 'edit_sites_specified', 'fully_specified']) {
+    assert.equal(PREDICATES[name](bare, {}), false, name);
+  }
+  // A missing specification block must not crash routing.
+  assert.equal(PREDICATES.fully_specified({ task: 'x' }, {}), false);
+});
+
+test('a plan without somewhere to apply it is not a complete brief', () => {
+  assert.equal(
+    PREDICATES.fully_specified({ specification: { hasPlan: true, hasEditSites: false, hasAcceptanceCriteria: true } }, {}),
+    false,
+  );
+  assert.equal(
+    PREDICATES.fully_specified({ specification: { hasPlan: true, hasEditSites: true, hasExpectedOutput: true } }, {}),
+    true,
+  );
 });
 
 test('deterministic predicates decide what code safely can', () => {

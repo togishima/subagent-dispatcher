@@ -33,7 +33,22 @@ export function workerEnv(worker, config) {
   return env;
 }
 
-export function buildClaudeArgs(worker, prompt, sessionId) {
+/**
+ * Permission rules letting a worker run the very checks that will judge it.
+ *
+ * Without this a worker is told to verify its own work and then denied the
+ * shell to do it with, so it reports blind and the first it hears of a mistake
+ * is an escalation. The grant is exactly the configured check commands — the
+ * ones the dispatcher is about to run anyway — and nothing else.
+ */
+export function verificationPermissions(worker, checks) {
+  if (worker.allowVerificationCommands === false) return [];
+  return [...new Set((checks ?? []).map((check) => check.command))]
+    .filter((command) => typeof command === 'string' && command.trim() !== '')
+    .map((command) => `Bash(${command.trim()})`);
+}
+
+export function buildClaudeArgs(worker, prompt, sessionId, checks = []) {
   const args = ['-p', prompt, '--output-format', 'json', '--session-id', sessionId];
   if (worker.agent) {
     const spec = inlineAgentSpec(worker);
@@ -44,7 +59,8 @@ export function buildClaudeArgs(worker, prompt, sessionId) {
   if (worker.maxTurns) args.push('--max-turns', String(worker.maxTurns));
   if (worker.permissionMode) args.push('--permission-mode', worker.permissionMode);
   args.push('--permission-prompts', 'none');
-  if (worker.allowedTools?.length) args.push('--allowedTools', worker.allowedTools.join(','));
+  const allowedTools = [...(worker.allowedTools ?? []), ...verificationPermissions(worker, checks)];
+  if (allowedTools.length) args.push('--allowedTools', allowedTools.join(','));
   if (worker.disallowedTools?.length) args.push('--disallowedTools', worker.disallowedTools.join(','));
   if (worker.strictMcpConfig) args.push('--strict-mcp-config');
   if (worker.bare) args.push('--bare');
@@ -100,7 +116,7 @@ export function extractUsage(result) {
 }
 
 /** Run one worker attempt. Never throws: every failure comes back as a result. */
-export async function runWorker({ worker, task, config }) {
+export async function runWorker({ worker, task, config, checks = [] }) {
   const started = Date.now();
   const prompt = buildWorkerPrompt(task);
   const sessionId = randomUUID();
@@ -116,7 +132,7 @@ export async function runWorker({ worker, task, config }) {
     return runCommandWorker({ worker, task, prompt, base, config });
   }
 
-  const args = buildClaudeArgs(worker, prompt, sessionId);
+  const args = buildClaudeArgs(worker, prompt, sessionId, checks);
   const command = process.env.JEV_DISPATCH_CLAUDE_BIN || 'claude';
   log.debug('spawning worker', { worker: worker.name, model: worker.model, agent: worker.agent, sessionId });
 

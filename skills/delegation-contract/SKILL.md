@@ -1,6 +1,6 @@
 ---
 name: delegation-contract
-description: How to hand execution work to a delegated worker with the delegate tool — what belongs in a subtask, how to scope context, and why worker capability is not yours to choose. Read when writing a delegate call, when a delegation comes back failed or needs_clarification, or when deciding whether work should be delegated at all.
+description: How to hand execution work to a delegated worker with the delegate tool — how to write a brief the worker can execute, what plan and context to pass, and why worker capability is not yours to choose. Read when writing a delegate call, when a delegation comes back failed or needs_clarification, or when deciding whether work should be delegated at all.
 ---
 
 # Delegation contract
@@ -63,11 +63,16 @@ no parameter for them, and asking in the task text does nothing — the worker i
 never told which tier it is, precisely so it does not calibrate its effort to its
 own price tag.
 
-So do not write "use a strong model for this", and do not try to compensate for an
-imagined cheap worker by padding the task. Describe the work accurately, flag the
-risks you know about, and the routing policy handles the rest. If the work is hard,
-say *why* it is hard in the task — that is what routes it, and it is also what the
-worker needs to know.
+So do not write "use a strong model for this", and do not try to compensate for
+an imagined cheap worker by padding the task.
+
+What you *can* control is how completely you specify the work, and that is the
+lever that actually matters. A vague brief needs someone to make the decisions,
+and that costs more however it is routed. A concrete one can simply be carried
+out. Describe the work accurately, hand over the plan you already have, flag the
+risks you know about, and the routing handles the rest. If the work is genuinely
+hard, say *why* it is hard in the task — that is both what routes it and what
+the worker needs to know.
 
 ## Reading the result
 
@@ -88,9 +93,13 @@ written. That is a specification problem, not a worker problem: read `blockers`,
 fix the subtask, and call again. Sending the same text to a stronger worker will
 not help, and the dispatcher deliberately does not try.
 
-`attempts > 1` or `escalated: true` tells you the first route was too weak for the
-work. Nothing is needed from you, but it is a signal that your task description
-undersold the difficulty.
+`attempts > 1` or `escalated: true` tells you the first route was too weak for
+the work. Nothing is needed from you, but it is a signal that your task
+description undersold the difficulty.
+
+`hint`, when present, says what the brief was missing. It appears only when a
+thin brief plausibly cost something — a retry, or a failure. Act on it for the
+next delegation rather than re-sending the same one.
 
 Treat `evidence` as the result and `summary` as the gloss. If you need more than
 `evidence` gives you, delegate a follow-up subtask rather than asking the worker

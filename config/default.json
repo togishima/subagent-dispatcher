@@ -7,7 +7,7 @@
     "fallbackTierOnRouterError": "medium",
 
     "policyGraph": {
-      "path": "policies/v1.json",
+      "path": "policies/v2.json",
       "defaultMinConfidence": 0.6,
       "overRouteOnUncertain": true,
       "onEvaluatorUnavailable": "safer-branch",
@@ -27,7 +27,9 @@
       "model": "jev-latest",
       "apiKeyEnv": "TYPESAFE_API_KEY",
       "timeoutMs": 8000,
-      "maxRetries": 3
+      "maxRetries": 3,
+      "sendPlan": true,
+      "maxPlanChars": 4000
     }
   },
 
@@ -45,6 +47,7 @@
 
   "workerDefaults": {
     "permissionMode": "acceptEdits",
+    "allowVerificationCommands": true,
     "bare": false,
     "strictMcpConfig": true,
     "timeoutMs": 900000,

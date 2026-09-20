@@ -76,20 +76,52 @@ function safeParse(text) {
 }
 
 /**
- * The prompt a worker receives. Only what the subtask needs — never the main
- * conversation. The tier is not mentioned: a worker must not know whether it is
- * the cheap one, or it will calibrate its effort to its own price tag.
+ * The prompt a worker receives.
+ *
+ * Only what the subtask needs — never the main conversation. The tier is not
+ * mentioned: a worker must not know whether it is the cheap one, or it will
+ * calibrate its effort to its own price tag.
+ *
+ * The ordering is deliberate. A worker reads the plan before the goal, because
+ * where a concrete plan exists, following it *is* the job — and a worker that
+ * reads the goal first tends to re-derive its own approach, which is the
+ * expensive reasoning the caller already paid for once.
  */
 export function buildWorkerPrompt(task) {
   const sections = [`# Subtask\n\n${task.task}`];
+
+  if (task.plan) {
+    sections.push(
+      `# Plan\n\nThis plan was worked out in advance. Follow it. If a step turns out to be wrong or impossible, stop and report that rather than substituting your own approach.\n\n${task.plan}`,
+    );
+  }
+  for (const document of task.planDocuments ?? []) {
+    sections.push(`# Plan document: ${document.path}\n\n${document.content}`);
+  }
   if (task.contextSummary) sections.push(`# Context\n\n${task.contextSummary}`);
+
   if (task.contextFiles?.length) {
-    sections.push(`# Relevant files\n\n${task.contextFiles.map((file) => `- ${file}`).join('\n')}`);
+    sections.push(`# Files to change\n\n${task.contextFiles.map((file) => `- ${file}`).join('\n')}`);
+  }
+  if (task.referenceFiles?.length) {
+    sections.push(
+      `# Files to read, not change\n\nRead these for the patterns and conventions to follow:\n\n${task.referenceFiles.map((file) => `- ${file}`).join('\n')}`,
+    );
+  }
+  if (task.constraints?.length) {
+    sections.push(`# Constraints\n\n${task.constraints.map((item) => `- ${item}`).join('\n')}`);
   }
   if (task.expectedOutput) sections.push(`# Expected output\n\n${task.expectedOutput}`);
+  if (task.acceptanceCriteria?.length) {
+    sections.push(
+      `# Acceptance criteria\n\nThe result is correct only when all of these hold:\n\n${task.acceptanceCriteria
+        .map((item) => `- ${item}`)
+        .join('\n')}\n\nCheck each one before reporting completion.`,
+    );
+  }
   if (task.verification?.command) {
     sections.push(
-      `# Verification\n\nYour work will be checked by running:\n\n    ${task.verification.command}\n\nRun it yourself before you report completion.`,
+      `# Verification\n\nYour work will be checked by running:\n\n    ${task.verification.command}\n\nYou are permitted to run this command yourself. Do so before you report completion.`,
     );
   }
   if (task.attempt > 1 && task.previousFeedback) {

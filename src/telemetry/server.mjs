@@ -7,7 +7,7 @@ import { log } from '../util/log.mjs';
 import { ingestMetrics } from './otlp.mjs';
 import {
   overview, timeline, taskDetail, confidenceView, workerView,
-  policyView, policyComparison, cacheCostView, policyVersionsSeen,
+  policyView, policyComparison, cacheCostView, policyVersionsSeen, specificationView,
 } from './queries.mjs';
 
 /**
@@ -107,6 +107,7 @@ export function createTelemetryServer(config, store) {
       limit: Math.min(500, Number(url.searchParams.get('limit')) || 50),
     }),
     '/api/confidence': (url) => confidenceView(store, { since: parseWindow(url) }),
+    '/api/specification': (url) => specificationView(store, { since: parseWindow(url) }),
     '/api/workers': (url) => workerView(store, { since: parseWindow(url) }),
     '/api/policy': (url) => policyView(store, { policyVersion: url.searchParams.get('policyVersion') || null }),
     '/api/comparison': () => policyComparison(store),

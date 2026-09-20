@@ -59,10 +59,16 @@ function armFor(value) {
   return ARMS.at(-1);
 }
 
-/** Synthetic Jev answers: confident most of the time, deliberately shaky sometimes. */
-function semanticAnswer() {
+/**
+ * Synthetic Jev answers: confident most of the time, deliberately shaky
+ * sometimes. `yesBias` lets a predicate correlate with the state it is asked
+ * about — a supplied plan really is more often an executable one — so the
+ * dashboard has a legible shape to show. It is a simulation of a plausible
+ * world, not evidence about the real one.
+ */
+function semanticAnswer(yesBias = 0.45) {
   const confidence = random() < 0.18 ? 0.5 + random() * 0.12 : 0.66 + random() * 0.33;
-  const yes = random() < 0.45;
+  const yes = random() < yesBias;
   const probability = yes ? confidence : 1 - confidence;
   return {
     result: yes ? 'yes' : 'no',
@@ -87,11 +93,24 @@ for (let i = 0; i < count; i += 1) {
   const [task, taskType] = pick(TASKS);
   const taskId = newId();
   const sessionId = 'seed-session';
-  store.openDelegation({ taskId, sessionId, task, taskType });
+
+  // Callers vary in how much of the thinking they hand over, which is the point
+  // of the specification view: complete briefs should route cheaper.
+  const hasPlan = random() < 0.5;
+  const specification = {
+    hasPlan,
+    planChars: hasPlan ? 300 + Math.round(random() * 1800) : 0,
+    planDocumentCount: hasPlan && random() < 0.6 ? 1 : 0,
+    hasAcceptanceCriteria: random() < (hasPlan ? 0.8 : 0.25),
+    hasEditSites: random() < (hasPlan ? 0.85 : 0.4),
+    hasConstraints: random() < 0.35,
+    hasExpectedOutput: random() < 0.7,
+  };
+  const verificationAvailable = random() < 0.7;
+  store.openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable });
 
   const policy = arm.mode === 'policy-graph' ? loadPolicy(baseConfig) : null;
   const semantic = policy ? semanticNodes(policy) : [];
-  const verificationAvailable = random() < 0.7;
 
   let escalatedTo = null;
   let escalated = false;
@@ -108,8 +127,17 @@ for (let i = 0; i < count; i += 1) {
 
     if (arm.mode === 'policy-graph') {
       const answers = {};
-      for (const node of semantic) answers[node.id] = semanticAnswer();
-      const walk = traverse(policy, { task, verificationAvailable, attempt }, answers, baseConfig.routing.policyGraph);
+      for (const node of semantic) {
+        // A caller who wrote a plan usually wrote a followable one.
+        const bias = node.id === 'plan_is_executable' ? (specification.hasPlan ? 0.78 : 0.2) : 0.45;
+        answers[node.id] = semanticAnswer(bias);
+      }
+      const walk = traverse(
+        policy,
+        { task, verificationAvailable, attempt, specification },
+        answers,
+        baseConfig.routing.policyGraph,
+      );
       const confidences = walk.trail
         .filter((step) => step.type === 'semantic' && typeof step.confidence === 'number')
         .map((step) => step.confidence);
@@ -186,7 +214,11 @@ for (let i = 0; i < count; i += 1) {
     lastWorker = resolved.worker.name;
     if (resolved.worker.frontier) frontierUsed = true;
 
-    const succeeded = random() < SUCCESS_BY_TIER[tier];
+    const fullySpecified =
+      specification.hasPlan && specification.hasEditSites &&
+      (specification.hasAcceptanceCriteria || specification.hasExpectedOutput);
+    const specBonus = fullySpecified ? 0.16 : specification.hasPlan ? 0.07 : 0;
+    const succeeded = random() < Math.min(0.98, SUCCESS_BY_TIER[tier] + specBonus);
     const verdict = !verificationAvailable ? 'UNCERTAIN' : succeeded ? 'PASS' : 'FAIL';
     if (verdict === 'UNCERTAIN') unverified = true;
 

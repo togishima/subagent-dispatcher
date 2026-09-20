@@ -61,6 +61,38 @@ export const PREDICATES = {
   /** True when the caller named at least `args.count` files as relevant context. */
   context_files_at_least: (input, args) => asArray(input.contextFiles).length >= (args.count ?? 1),
 
+  // --- specification completeness -------------------------------------------
+  // How well specified a subtask is decides how much capability executing it
+  // needs, so these are routing inputs rather than prompt decoration. Whether a
+  // plan exists is decided here; whether it is good enough is a semantic
+  // question and stays one.
+
+  /** True when the caller supplied a plan, inline or as a document. */
+  plan_provided: (input) => Boolean(input.specification?.hasPlan),
+
+  /** True when the supplied plan is at least `args.chars` characters long. */
+  plan_at_least: (input, args) => (input.specification?.planChars ?? 0) >= (args.chars ?? 200),
+
+  /** True when the caller stated concrete acceptance criteria. */
+  acceptance_criteria_provided: (input) => Boolean(input.specification?.hasAcceptanceCriteria),
+
+  /** True when the caller said which files to change. */
+  edit_sites_specified: (input) => Boolean(input.specification?.hasEditSites),
+
+  /** True when the caller stated what not to do. */
+  constraints_provided: (input) => Boolean(input.specification?.hasConstraints),
+
+  /**
+   * True when the caller handed over a complete brief: a plan, the files to
+   * change, and a checkable definition of done. This is the shape a task has
+   * when the thinking has already been done somewhere else.
+   */
+  fully_specified: (input) => {
+    const spec = input.specification;
+    if (!spec) return false;
+    return spec.hasPlan && spec.hasEditSites && (spec.hasAcceptanceCriteria || spec.hasExpectedOutput);
+  },
+
   /** True on any attempt after the first. */
   previous_attempt_failed: (input) => (input.attempt ?? 1) > 1,
 

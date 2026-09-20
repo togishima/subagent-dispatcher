@@ -89,11 +89,16 @@ export class TelemetryStore {
 
   // --------------------------------------------------------------- delegations
 
-  openDelegation({ taskId, sessionId, task, taskType }) {
+  openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable }) {
+    // Specification signals are counts and flags, never the plan text itself.
+    const spec = specification ?? {};
     this.db
       .prepare(
-        `INSERT INTO delegations (task_id, created_at, session_id, routing_mode, task_hash, title, task_type, raw_task)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO delegations (
+           task_id, created_at, session_id, routing_mode, task_hash, title, task_type,
+           has_plan, plan_chars, plan_document_count, has_acceptance_criteria,
+           has_edit_sites, has_constraints, fully_specified, verification_available, raw_task
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         taskId,
@@ -103,6 +108,14 @@ export class TelemetryStore {
         taskHash(task),
         sanitizeTitle(task, this.config),
         taskType ?? null,
+        bool(spec.hasPlan),
+        spec.planChars ?? 0,
+        spec.planDocumentCount ?? 0,
+        bool(spec.hasAcceptanceCriteria),
+        bool(spec.hasEditSites),
+        bool(spec.hasConstraints),
+        bool(spec.hasPlan && spec.hasEditSites && (spec.hasAcceptanceCriteria || spec.hasExpectedOutput)),
+        bool(verificationAvailable),
         rawTaskIfEnabled(task, this.config),
       );
   }

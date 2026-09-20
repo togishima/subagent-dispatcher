@@ -54,7 +54,8 @@ test('the main session is offered no way to choose a model, worker or tier', asy
 
   // The whole contract: no capability knob exists to turn.
   assert.deepEqual(parameters.sort(), [
-    'context', 'contextFiles', 'expectedOutput', 'riskFlags', 'task', 'taskType', 'verification',
+    'acceptanceCriteria', 'constraints', 'context', 'contextFiles', 'expectedOutput',
+    'plan', 'planFiles', 'referenceFiles', 'riskFlags', 'task', 'taskType', 'verification',
   ]);
   assert.equal(delegate.inputSchema.additionalProperties, false);
 
@@ -91,7 +92,7 @@ test('status reports the experiment, and points at the local dashboard only', as
   ]);
   const status = call.result.structuredContent;
   assert.equal(status.routingMode, 'policy-graph');
-  assert.equal(status.policyVersion, 'v1');
+  assert.equal(status.policyVersion, 'v2');
   assert.match(status.dashboard, /^http:\/\/127\.0\.0\.1:/);
   assert.equal(typeof status.delegations, 'number');
 });

@@ -476,3 +476,67 @@ export function exportForPolicyAuthoring(store, { since = null, limit = 5000 } =
     })),
   };
 }
+
+/**
+ * Does specifying the work better actually move it to a cheaper worker?
+ *
+ * This is the question the delegation interface exists to make answerable. Each
+ * row is a population of delegations sharing a specification property, scored
+ * the same way, so a thin brief and a complete one can be read against each
+ * other rather than argued about.
+ */
+export function specificationView(store, { since = null } = {}) {
+  const win = windowClause(since);
+  const tiers = orderedTiers(store.config);
+  const cheapest = tiers[0];
+  const topTier = tiers.at(-1);
+
+  const population = (label, predicate, note) => {
+    const row = store.queryOne(
+      `SELECT COUNT(*) AS n,
+              AVG(final_success) AS success,
+              AVG(first_route_success) AS first_route,
+              AVG(escalated) AS escalated,
+              AVG(frontier_used) AS frontier,
+              AVG(attempt_count) AS attempts,
+              AVG(total_cost_usd) AS avg_cost,
+              COALESCE(SUM(total_cost_usd), 0) AS total_cost,
+              SUM(final_success) AS successes,
+              SUM(CASE WHEN first_route_tier = ? THEN 1 ELSE 0 END) AS routed_cheapest,
+              SUM(CASE WHEN first_route_tier = ? THEN 1 ELSE 0 END) AS routed_top
+       FROM delegations WHERE ${FINISHED} AND ${predicate}${win.sql}`,
+      [cheapest, topTier, ...win.params],
+    );
+    return {
+      population: label,
+      note,
+      count: row.n ?? 0,
+      cheapestRouteRate: ratio(row.routed_cheapest, row.n),
+      topRouteRate: ratio(row.routed_top, row.n),
+      taskSuccessRate: row.success,
+      firstRouteSuccessRate: row.first_route,
+      escalationRate: row.escalated,
+      frontierInvocationRate: row.frontier,
+      averageAttempts: row.attempts,
+      averageCostUsd: row.avg_cost,
+      costPerSuccess: ratio(row.total_cost, row.successes),
+    };
+  };
+
+  return {
+    cheapestTier: cheapest,
+    topTier,
+    populations: [
+      population('Complete brief', 'fully_specified = 1', 'plan + files to change + a definition of done'),
+      population('Plan, but incomplete', 'has_plan = 1 AND fully_specified = 0', 'a plan without the rest'),
+      population('No plan', 'has_plan = 0', 'the subtask arrived as a goal'),
+    ].filter((row) => row.count > 0),
+    signals: [
+      { signal: 'Plan supplied', ...population('plan', 'has_plan = 1') },
+      { signal: 'Files to change named', ...population('edit sites', 'has_edit_sites = 1') },
+      { signal: 'Acceptance criteria given', ...population('criteria', 'has_acceptance_criteria = 1') },
+      { signal: 'Constraints stated', ...population('constraints', 'has_constraints = 1') },
+      { signal: 'Deterministic check available', ...population('verification', 'verification_available = 1') },
+    ].filter((row) => row.count > 0),
+  };
+}

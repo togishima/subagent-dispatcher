@@ -34,10 +34,13 @@ test('three routers are registered: the three arms of the experiment', () => {
 
 test('every semantic predicate goes out in one batched call', async () => {
   const config = testConfig({ routing: { mode: 'policy-graph' } });
-  const stub = stubJev(() => noulAnswers({ mechanical: 0.9, cross_cutting: 0.1, root_cause_unknown: 0.1, high_stakes_judgment: 0.1 }));
+  const stub = stubJev(() => noulAnswers({ mechanical: 0.9, plan_is_executable: 0.9, cross_cutting: 0.1, root_cause_unknown: 0.1, high_stakes_judgment: 0.1 }));
   process.env.TYPESAFE_API_KEY = 'test-key';
   try {
-    const decision = await createRouter(config).route({ task: 'add a null check', verificationAvailable: true, attempt: 1 });
+    const decision = await createRouter(config).route({
+      task: 'add a null check', verificationAvailable: true, attempt: 1,
+      specification: { hasPlan: false },
+    });
     assert.equal(stub.calls.length, 1, 'one request, not one per predicate');
     const questions = stub.calls[0].body.questions;
     assert.ok(Object.keys(questions).length >= 4);
@@ -47,7 +50,7 @@ test('every semantic predicate goes out in one batched call', async () => {
     }
     assert.equal(decision.requiredTier, 'low');
     assert.equal(decision.router, 'policy-graph');
-    assert.equal(decision.policyVersion, 'v1');
+    assert.equal(decision.policyVersion, 'v2');
   } finally {
     stub.restore();
   }
@@ -55,7 +58,7 @@ test('every semantic predicate goes out in one batched call', async () => {
 
 test('Jev is never shown a model, a worker or a tier name', async () => {
   const config = testConfig({ routing: { mode: 'policy-graph' } });
-  const stub = stubJev(() => noulAnswers({ mechanical: 0.2, cross_cutting: 0.2, root_cause_unknown: 0.2, high_stakes_judgment: 0.2 }));
+  const stub = stubJev(() => noulAnswers({ mechanical: 0.2, plan_is_executable: 0.2, cross_cutting: 0.2, root_cause_unknown: 0.2, high_stakes_judgment: 0.2 }));
   process.env.TYPESAFE_API_KEY = 'test-key';
   try {
     await createRouter(config).route({ task: 'do a thing', verificationAvailable: false, attempt: 1 });

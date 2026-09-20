@@ -17,6 +17,9 @@ jev-dispatch export --since 168 > last-week.json   # last 7 days
 Each delegation in the dump carries:
 
 - the decision: `routing_mode`, `policy_version`, `first_route_tier`
+- how well the caller specified it: `has_plan`, `plan_chars`,
+  `has_acceptance_criteria`, `has_edit_sites`, `fully_specified`,
+  `verification_available`
 - the full traversal: every predicate with its `result`, `confidence` and
   probability distribution, and whether traversal actually `used` it
 - the outcome: `final_success`, `first_route_success`, `escalated`,
@@ -49,6 +52,9 @@ schema below. A prompt along these lines works:
 > - Anything ordinary code can decide safely must become a deterministic
 >   predicate. Only use a semantic predicate where code cannot express it.
 > - Uncertainty must resolve toward the more capable tier.
+> - How completely the caller specified the work is a routing input. A complete
+>   brief that still routes expensively, or a thin one that routes cheaply and
+>   then escalates, both mean the policy is reading specification badly.
 >
 > Return a complete policy JSON document, with a short rationale per change.
 
@@ -148,7 +154,9 @@ anything, and it should never be asked to.
   boundary actually gets defined. A question without them relies on the model
   guessing where you would have drawn the line.
 - **Prefer code.** If a deterministic predicate can answer it, it is faster,
-  free, exactly reproducible, and never uncertain.
+  free, exactly reproducible, and never uncertain. `plan_is_executable` is the
+  model of a question worth asking a model: whether a plan *exists* is a fact
+  and is decided in code; whether it is *followable* is a judgement and is not.
 
 Adding a predicate to the registry (`src/policy/predicates.mjs`) is the
 supported way to extend routing without touching traversal. Predicates must be

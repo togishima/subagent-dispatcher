@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { buildClaudeArgs, workerEnv, extractUsage } from '../src/worker/run.mjs';
+import { buildClaudeArgs, workerEnv, extractUsage, verificationPermissions } from '../src/worker/run.mjs';
 import { parseAgentFile, inlineAgentSpec } from '../src/worker/agent-defs.mjs';
 import { normalizeWorkerOutput, buildWorkerPrompt } from '../src/worker/contract.mjs';
 import { snapshotWorktree, diffSnapshots, resolveChangedFiles } from '../src/worker/changed-files.mjs';
@@ -36,6 +36,34 @@ test('each worker gets its own session id, so runs never collide', () => {
   const a = buildClaudeArgs(worker, 'p', 'aaaaaaaa-0000-4000-8000-000000000000');
   const b = buildClaudeArgs(worker, 'p', 'bbbbbbbb-0000-4000-8000-000000000000');
   assert.notEqual(a[a.indexOf('--session-id') + 1], b[b.indexOf('--session-id') + 1]);
+});
+
+test('a worker may run exactly the checks that will judge it, and nothing more', () => {
+  const worker = workerForTier(config, 'low');
+  const checks = [
+    { name: 'tests', command: 'node check.mjs' },
+    { name: 'lint', command: 'npm run lint' },
+    { name: 'again', command: 'node check.mjs' },
+  ];
+  // Deduplicated, and scoped to the exact commands — not a blanket Bash grant.
+  assert.deepEqual(verificationPermissions(worker, checks), ['Bash(node check.mjs)', 'Bash(npm run lint)']);
+
+  const args = buildClaudeArgs(worker, 'p', '00000000-0000-4000-8000-000000000000', checks);
+  const allowed = args[args.indexOf('--allowedTools') + 1];
+  assert.ok(allowed.includes('Bash(node check.mjs)'));
+  assert.ok(!allowed.split(',').includes('Bash'), 'never a blanket Bash grant');
+});
+
+test('with no checks configured a worker gets no shell grant at all', () => {
+  const worker = workerForTier(config, 'low');
+  assert.deepEqual(verificationPermissions(worker, []), []);
+  const args = buildClaudeArgs(worker, 'p', '00000000-0000-4000-8000-000000000000', []);
+  assert.equal(args.includes('--allowedTools'), false);
+});
+
+test('the check grant can be turned off by the operator', () => {
+  const worker = { ...workerForTier(config, 'low'), allowVerificationCommands: false };
+  assert.deepEqual(verificationPermissions(worker, [{ name: 'x', command: 'rm -rf /' }]), []);
 });
 
 test('the router credential never reaches a worker', () => {
@@ -117,6 +145,39 @@ test('the worker prompt carries the subtask and never the tier', () => {
     assert.ok(prompt.includes(fragment), fragment);
   }
   assert.ok(!/\b(low|medium|high)[- ]worker\b/i.test(prompt));
+});
+
+test('the prompt leads with the plan, so the worker applies it instead of re-deriving one', () => {
+  const prompt = buildWorkerPrompt({
+    task: 'make the cache evict',
+    plan: '1. change get()\n2. change set()',
+    planDocuments: [{ path: 'docs/PLAN.md', content: 'the long form plan' }],
+    contextSummary: 'a summary',
+    contextFiles: ['cache.mjs'],
+    referenceFiles: ['other.mjs'],
+    constraints: ['do not change the constructor'],
+    acceptanceCriteria: ['evicts the least recently used key'],
+  });
+  for (const fragment of [
+    '1. change get()', 'docs/PLAN.md', 'the long form plan', 'cache.mjs', 'other.mjs',
+    'do not change the constructor', 'evicts the least recently used key',
+  ]) {
+    assert.ok(prompt.includes(fragment), fragment);
+  }
+  // The plan comes before the goal: a worker that reads the goal first invents
+  // its own approach, which is the reasoning the caller already paid for.
+  assert.ok(prompt.indexOf('# Plan') < prompt.indexOf('# Context'));
+  assert.ok(prompt.indexOf('Follow it') < prompt.indexOf('# Acceptance criteria'));
+  // Files to change and files to read are not the same instruction.
+  assert.ok(prompt.includes('# Files to change'));
+  assert.ok(prompt.includes('# Files to read, not change'));
+});
+
+test('a prompt with no plan simply omits those sections', () => {
+  const prompt = buildWorkerPrompt({ task: 'do X' });
+  assert.ok(!prompt.includes('# Plan'));
+  assert.ok(!prompt.includes('# Constraints'));
+  assert.ok(prompt.includes('do X'));
 });
 
 test('usage is read from the worker result, and missing usage is zero not NaN', () => {

@@ -76,7 +76,7 @@ registerRouter('policy-graph', (config) => {
 
       if (semantic.length > 0) {
         try {
-          const state = buildRoutingState(input);
+          const state = buildRoutingState(input, config.routing.jev);
           const result = await evaluateSemanticPredicates(semantic, state, config.routing.jev, input.signal);
           answers = result.answers;
           jevLatencyMs = result.latencyMs;
@@ -152,7 +152,7 @@ registerRouter('jev-direct', (config) => {
     async route(input) {
       const started = Date.now();
       try {
-        const state = buildRoutingState(input);
+        const state = buildRoutingState(input, config.routing.jev);
         const result = await classifyTierDirectly(state, config.tiers, config.routing.jev, input.signal);
 
         let tier = result.tier;

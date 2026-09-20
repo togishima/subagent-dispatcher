@@ -34,6 +34,7 @@
   <button data-view="overview" aria-current="true">Overview</button>
   <button data-view="timeline">Routing timeline</button>
   <button data-view="policy">Policy effectiveness</button>
+  <button data-view="specification">Specification</button>
   <button data-view="confidence">Confidence</button>
   <button data-view="workers">Workers</button>
   <button data-view="cost">Cache &amp; cost</button>
@@ -76,6 +77,31 @@
         A predicate whose branches have the same outcome is not routing anything.
       </p>
       <div id="predicates"></div>
+    </div>
+  </section>
+
+  <section id="view-specification" hidden>
+    <div class="card">
+      <h2>Does a better brief buy a cheaper worker?</h2>
+      <p class="note">
+        Delegations grouped by how completely the caller specified them. A complete brief — the plan,
+        the files to change, and a checkable definition of done — should route cheaper and escalate less.
+        If it does not, the routing policy is not reading specification well.
+      </p>
+      <div class="scroll"><table id="spec-populations"></table></div>
+    </div>
+    <div class="card">
+      <h2>Routed to the cheapest worker</h2>
+      <p class="note">Share of each population the policy sent to the cheapest worker on its first route.</p>
+      <div class="bars" id="spec-cheapest"></div>
+    </div>
+    <div class="card">
+      <h2>Individual signals</h2>
+      <p class="note">
+        Each row is every delegation carrying that one signal, so the rows overlap. Useful for seeing which
+        part of a brief is doing the work.
+      </p>
+      <div class="scroll"><table id="spec-signals"></table></div>
     </div>
   </section>
 
