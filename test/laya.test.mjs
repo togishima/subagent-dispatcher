@@ -194,3 +194,20 @@ test('the adapter script is valid Python and speaks the documented protocol', as
   });
   assert.equal(compiled, true, 'laya_server.py must compile');
 });
+
+test("the defaults point at the model authors' own package, not a third-party port", () => {
+  // `provider: laya` with nothing else said must not reach for a package the
+  // model's authors neither publish nor acknowledge. The MLX port stays
+  // reachable, but only by asking for it.
+  let captured = null;
+  const engine = createLayaEngine(
+    { routing: { semanticEvaluator: { provider: 'laya' } } },
+    { processFactory: (settings) => { captured = settings; return fakeProcess({})(settings); } },
+  );
+  assert.equal(engine.describe().model, 'convaiinnovations/laya');
+  assert.equal(captured.runtime, 'torch');
+  // The first load downloads the weights, measured at 79s here. A timeout
+  // shorter than the thing it times makes routing take the safer branch on
+  // every cold cache.
+  assert.ok(captured.startupTimeoutMs >= 300_000, 'startup allowance must cover a first download');
+});

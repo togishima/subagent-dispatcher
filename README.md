@@ -191,6 +191,14 @@ verification:
 regular expression, not a glob) and `taskTypeIn`. Changed files are read from
 git, not from what the worker claims it did.
 
+A check that **exits 127** is read as "this could not judge the work" rather
+than as a failure — which is what keeps a repository with no test script from
+failing every delegation, without lying about it either: the verdict becomes
+`UNCERTAIN`, never `PASS`. `examples/checks/` has four written that way (git
+hygiene, node, python, rust), and the commands above are the naive form: `npm
+test` in a repository whose `package.json` has no test script exits 1, and every
+delegation there is judged a failure.
+
 ## Use it
 
 From a Claude Code session, delegable execution work goes through the tool:
@@ -383,20 +391,43 @@ frontier rate beside the latency rather than in another tab.
 
 ```yaml
 routing:
-  mode: policy-graph               # unchanged
+  mode: policy-graph                  # unchanged
   semanticEvaluator:
-    provider: laya                 # jev | laya | mock
+    provider: laya                    # jev | laya | mock
     laya:
-      model: aac6fef/laya-mlx      # or aac6fef/laya-multilingual-mlx
-      runtime: auto                # auto | mlx | torch
-      timeoutMs: 5000
+      python: ~/.jev-dispatch/laya-venv/bin/python
 ```
 
+Everything else is defaulted in `src/router/engines/laya.mjs`: the model authors'
+own package and the `convaiinnovations/laya` weights. `python` is worth naming
+explicitly — a Homebrew or system interpreter is externally managed, so the
+install below goes into a virtual environment and the adapter has to be told
+where it went.
+
 ```bash
-pip install laya-mlx              # Apple silicon; `pip install laya` elsewhere
+uv venv ~/.jev-dispatch/laya-venv --python 3.12
+uv pip install --python ~/.jev-dispatch/laya-venv/bin/python laya
+
 jev-dispatch evaluators           # what is available and what is selected
 jev-dispatch check-evaluator      # one real evaluation, including the model load
 ```
+
+Measured on an M2 Pro with that setup: **30s model load per process** (79s the
+first time, which downloads ~850MB), **3.7 GiB resident**, and **527ms for two
+predicates in one batched call**.
+
+An MLX runtime exists and is much faster on Apple silicon, but it is a third
+party's port — neither the `laya-mlx` package nor the `aac6fef/laya-mlx`
+checkpoint it loads is published or acknowledged by the model's authors — so it
+is opt-in rather than the default:
+
+```yaml
+      runtime: mlx                    # auto | mlx | torch
+      model: aac6fef/laya-mlx         # the port's own checkpoint
+```
+
+It has not been run here. The figures its author reports — 13.4 ms P50 for the
+421M checkpoint, 7.4 ms for the 322M, on an M3 Max — are theirs.
 
 Laya ships as a library with no server mode, and its CLI reloads the model on
 every invocation — which is exactly what must not happen when routing calls it
@@ -687,13 +718,13 @@ would rather cap the cost.
   quality numbers. The dashboard reports the unverified rate for this reason.
 - **The OTel counter store is a snapshot, not a time series.** It answers "what
   is the cache read ratio", not "how did it move over the last hour".
-- **Neither evaluator has been run against a live service here.** The Laya
-  backend is exercised against a fake process that speaks the documented
-  protocol, and `runtime/laya_server.py` is compiled and driven end to end
-  against a stand-in module — but no real model has been loaded, because that
-  needs Apple silicon. `jev-dispatch check-evaluator` is how you confirm it on a
-  machine that has one; the M3 Max figures quoted upstream (13.4 ms P50 for the
-  421M checkpoint, 7.4 ms for the 322M) are theirs, not measurements from here.
+- **Laya has been run for real; the MLX runtime has not.** The default
+  configuration — the authors' `laya` package and the `convaiinnovations/laya`
+  weights — was loaded on an M2 Pro and answered real predicates through
+  `jev-dispatch check-evaluator`, which is where the figures above come from.
+  The MLX port is still only exercised against a fake process that speaks the
+  documented protocol, so its numbers remain its author's claim, not a
+  measurement from here. One run of one machine is also not a benchmark.
 - **The Jev integration has not been run against a live service either.** Everything
   downstream of routing — worker execution, verification, escalation, telemetry,
   the dashboard — was verified end to end with `fixed-*` modes, which make no

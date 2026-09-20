@@ -23,7 +23,7 @@
     },
 
     "semanticEvaluator": {
-      "$comment": "Who answers the policy graph's boolean predicates. The graph itself is unaffected by this choice. jev calls TypeSafe or a gateway; laya runs locally on Apple silicon; mock returns fixed answers. Leaving this out keeps the original behaviour, which is jev.",
+      "$comment": "Who answers the policy graph's boolean predicates. The graph itself is unaffected by this choice. jev calls TypeSafe or a gateway; laya runs locally through the model authors' own package; mock returns fixed answers. Leaving this out keeps the original behaviour, which is jev. The laya settings - model, runtime, python, timeouts - default in src/router/engines/laya.mjs so there is one place to read them; add a laya block here to override them.",
       "provider": "jev",
       "mock": {
         "answers": {},
