@@ -174,14 +174,29 @@ class LayaProcess {
   }
 }
 
+/**
+ * What `provider: laya` means when nothing else is said.
+ *
+ * The model authors, Convai Innovations, publish `laya` on PyPI and the weights
+ * at `convaiinnovations/laya`; that is what these defaults point at. The MLX
+ * port is faster on Apple silicon but is a third party's work — neither it nor
+ * the checkpoint it loads is published or acknowledged by the model's authors —
+ * so it is opt-in (`runtime: mlx` with the matching `model`) rather than what
+ * you get by not choosing.
+ *
+ * `startupTimeoutMs` covers the first load, which downloads ~850MB: 79s
+ * measured here including the download, 30s from a warm cache. A timeout is
+ * read as an unavailable engine, which routes everything to the safest branch,
+ * so the allowance is generous on purpose.
+ */
 const DEFAULTS = {
-  model: 'aac6fef/laya-mlx',
-  runtime: 'auto',
+  model: 'convaiinnovations/laya',
+  runtime: 'torch',
   dtype: 'float16',
   python: 'python3',
   script: null,
   timeoutMs: 5000,
-  startupTimeoutMs: 120_000,
+  startupTimeoutMs: 300_000,
 };
 
 export function createLayaEngine(config, { processFactory } = {}) {
