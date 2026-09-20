@@ -23,9 +23,13 @@
     },
 
     "jev": {
-      "endpoint": "https://api.typesafe.ai/v1/systemone",
+      "$comment": "provider picks the defaults below; every one of them can be overridden. Only the typesafe shape has been checked against a running service — run `jev-dispatch check-router` before trusting another.",
+      "provider": "typesafe",
+      "endpoint": null,
+      "apiKeyEnv": null,
+      "accountId": null,
+      "headers": {},
       "model": "jev-latest",
-      "apiKeyEnv": "TYPESAFE_API_KEY",
       "timeoutMs": 8000,
       "maxRetries": 3,
       "sendPlan": true,

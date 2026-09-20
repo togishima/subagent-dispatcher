@@ -138,6 +138,13 @@ at dispatch time, quietly.
 Declaring `onUncertain` also overrides derivation where you know better than the
 graph shape does.
 
+## A note on the evaluator
+
+Everything in this document assumes Jev answers the semantic predicates. Which
+service serves it — TypeSafe directly, Cloudflare Workers AI, Vercel's AI
+Gateway, a LiteLLM proxy — is `routing.jev.provider` and changes nothing here: a
+policy is written against questions, not endpoints.
+
 ## Writing a good semantic question
 
 Jev answers a narrow, typed question well. It is not being asked to schedule

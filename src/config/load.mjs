@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseYaml } from './yaml.mjs';
 import { defaultConfigPath, userConfigCandidates } from '../util/paths.mjs';
+import { PROVIDERS, providerNames, resolveProvider } from '../router/providers.mjs';
 import { log } from '../util/log.mjs';
 
 export const ROUTING_MODES = [
@@ -114,6 +115,22 @@ function validate(config) {
     if (!tiers[floorTier]) {
       problems.push(`routing.jevDirect.confidencePolicy.floorTier "${floorTier}" is not a defined tier`);
     }
+  }
+
+  // Resolving the provider here means a bad endpoint or a missing accountId is
+  // reported at startup rather than on the first delegation.
+  const jev = config.routing?.jev ?? {};
+  if (jev.provider && !PROVIDERS[jev.provider]) {
+    problems.push(`routing.jev.provider must be one of ${providerNames().join(', ')}`);
+  } else if (mode === 'policy-graph' || mode === 'jev-direct') {
+    try {
+      resolveProvider(jev);
+    } catch (error) {
+      problems.push(error.message);
+    }
+  }
+  if (jev.headers && typeof jev.headers !== 'object') {
+    problems.push('routing.jev.headers must be an object of header names to values');
   }
 
   const briefCheck = config.contract?.briefCheck ?? 'advise';

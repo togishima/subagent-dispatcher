@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { WORKER_OUTPUT_SCHEMA, buildWorkerPrompt, normalizeWorkerOutput } from './contract.mjs';
 import { inlineAgentSpec } from './agent-defs.mjs';
 import { snapshotWorktree, resolveChangedFiles } from './changed-files.mjs';
+import { PROVIDERS } from '../router/providers.mjs';
 import { log } from '../util/log.mjs';
 
 /**
@@ -25,8 +26,12 @@ export function workerEnv(worker, config) {
   for (const key of worker.passEnv ?? []) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
-  // The Jev key belongs to the router alone; a worker has no reason to hold it.
-  delete env[config.routing.jev.apiKeyEnv];
+  // The routing credential belongs to the router alone; a worker has no reason to
+  // hold it. Every provider's variable is stripped, not just the configured one:
+  // apiKeyEnv may be null (the provider supplies the default), and an operator
+  // who switches providers should not have to remember to revisit this.
+  for (const provider of Object.values(PROVIDERS)) delete env[provider.apiKeyEnv];
+  if (config.routing.jev.apiKeyEnv) delete env[config.routing.jev.apiKeyEnv];
   // Workers must not inherit the parent's telemetry export or session identity.
   env.CLAUDE_CODE_ENABLE_TELEMETRY = '0';
   env.JEV_DISPATCH_WORKER = '1';

@@ -8,6 +8,7 @@ import { parseAgentFile, inlineAgentSpec } from '../src/worker/agent-defs.mjs';
 import { normalizeWorkerOutput, buildWorkerPrompt } from '../src/worker/contract.mjs';
 import { snapshotWorktree, diffSnapshots, resolveChangedFiles } from '../src/worker/changed-files.mjs';
 import { workerForTier } from '../src/config/load.mjs';
+import { PROVIDERS } from '../src/router/providers.mjs';
 import { testConfig, tempDir } from './helpers.mjs';
 
 const config = testConfig();
@@ -66,17 +67,28 @@ test('the check grant can be turned off by the operator', () => {
   assert.deepEqual(verificationPermissions(worker, [{ name: 'x', command: 'rm -rf /' }]), []);
 });
 
-test('the router credential never reaches a worker', () => {
-  const previous = process.env.TYPESAFE_API_KEY;
-  process.env.TYPESAFE_API_KEY = 'secret-value';
+test('no routing credential reaches a worker, whichever provider is configured', () => {
+  const keyVars = [...new Set(Object.values(PROVIDERS).map((provider) => provider.apiKeyEnv))];
+  const saved = Object.fromEntries(keyVars.map((name) => [name, process.env[name]]));
+  for (const name of keyVars) process.env[name] = 'secret-value';
   try {
-    const env = workerEnv({ ...workerForTier(config, 'low'), passEnv: ['PATH', 'TYPESAFE_API_KEY'] }, config);
-    assert.equal(env.TYPESAFE_API_KEY, undefined);
+    // Ask for them explicitly: the allowlist must not be the only thing stopping this.
+    const env = workerEnv({ ...workerForTier(config, 'low'), passEnv: ['PATH', ...keyVars] }, config);
+    for (const name of keyVars) assert.equal(env[name], undefined, `${name} leaked to the worker`);
     assert.ok(env.PATH);
     assert.equal(env.CLAUDE_CODE_ENABLE_TELEMETRY, '0');
+
+    // And a custom variable named in config is stripped too.
+    process.env.MY_GATEWAY_KEY = 'also-secret';
+    const custom = testConfig({ routing: { jev: { apiKeyEnv: 'MY_GATEWAY_KEY' } } });
+    const customEnv = workerEnv({ ...workerForTier(custom, 'low'), passEnv: ['PATH', 'MY_GATEWAY_KEY'] }, custom);
+    assert.equal(customEnv.MY_GATEWAY_KEY, undefined);
   } finally {
-    if (previous === undefined) delete process.env.TYPESAFE_API_KEY;
-    else process.env.TYPESAFE_API_KEY = previous;
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    delete process.env.MY_GATEWAY_KEY;
   }
 });
 
