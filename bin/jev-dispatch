@@ -8,6 +8,7 @@ import { createRouter } from '../src/router/index.mjs';
 import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
 import { predicateNames } from '../src/policy/predicates.mjs';
 import { applicableChecks } from '../src/verify/index.mjs';
+import { collectFacts, FACT_STATUS } from '../src/facts/index.mjs';
 import { probeProvider } from '../src/router/jev-client.mjs';
 import { PROVIDERS as PROVIDERS_FOR_HELP, SOURCE, resolveProvider, providerNames } from '../src/router/providers.mjs';
 import { resolveApiKey } from '../src/config/plugin-options.mjs';
@@ -32,6 +33,7 @@ const USAGE = `jev-dispatch — Jev-powered subagent scheduler
   config path               Print where configuration is read from
   config set <key> <value>  Write one dotted key into the user config
   policy                    Print the active routing policy
+  facts                     Collect deterministic code facts here and print them
   predicates                List the deterministic predicates a policy may use
   export [--since <hours>]  Dump historical routing decisions for offline policy authoring
   purge [--yes]             Delete the telemetry database
@@ -194,11 +196,15 @@ async function route(taskWords) {
   if (!task) { console.error('usage: jev-dispatch route <task…>'); process.exit(1); }
   const router = createRouter(config);
   const checks = applicableChecks(config, { cwd: process.cwd(), taskType: null });
+  // Facts are collected before routing here too, so a dry run traverses the
+  // same graph on the same evidence a real delegation would.
+  const codeFacts = await collectFacts(config, { cwd: process.cwd(), contextFiles: [] });
   const decision = await router.route({
     task,
     cwd: process.cwd(),
     attempt: 1,
     verificationAvailable: checks.length > 0,
+    codeFacts,
     contextFiles: [],
     riskFlags: [],
     tierOrders: Object.fromEntries(Object.entries(config.tiers).map(([name, tier]) => [name, tier.order])),
@@ -395,6 +401,29 @@ switch (command) {
       console.log(`  no:  ${edge('no')}`);
       if (node.type === 'semantic') console.log(`  uncertain → ${node.$safer} (${node.$saferSource})`);
       console.log('');
+    }
+    break;
+  }
+  case 'facts': {
+    // The fact layer on its own: no routing, no worker, no model. Answers the
+    // question "would Semgrep tell the policy anything about this repository",
+    // which is otherwise only visible by reading telemetry after a dispatch.
+    const settings = config.facts?.semgrep ?? {};
+    if (!settings.enabled) {
+      console.log('semgrep      disabled  (enable with "jev-dispatch config set facts.semgrep.enabled true")');
+      console.log('facts        —');
+      break;
+    }
+    const facts = await collectFacts(config, { cwd: process.cwd(), contextFiles: rest });
+    const state = facts.status === FACT_STATUS.OK ? 'available' : `unavailable (${facts.status})`;
+    console.log(`semgrep      ${state}`);
+    console.log(`rules        ${settings.config ?? '(none configured)'}`);
+    console.log(`latency      ${facts.semgrep.latencyMs}ms`);
+    console.log(`matches      ${facts.semgrep.matchCount}`);
+    console.log(`facts        ${facts.matched.length > 0 ? facts.matched.join(', ') : '—'}`);
+    if (facts.unavailable) {
+      console.log('');
+      console.log('Unavailable evidence means unknown, not true: routing is unchanged by this.');
     }
     break;
   }

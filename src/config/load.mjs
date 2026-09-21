@@ -172,6 +172,19 @@ function validate(config) {
     }
   }
 
+  // Fact collection is optional evidence, so a misconfiguration here is caught
+  // at startup rather than silently producing no facts on every dispatch.
+  const semgrep = config.facts?.semgrep ?? {};
+  if (semgrep.enabled) {
+    if (!(semgrep.timeoutMs >= 1)) problems.push('facts.semgrep.timeoutMs must be >= 1');
+    if (semgrep.config != null && typeof semgrep.config !== 'string') {
+      problems.push('facts.semgrep.config must be a path to a Semgrep rules file, or null');
+    }
+    if (semgrep.ruleFacts != null && !isPlainObject(semgrep.ruleFacts)) {
+      problems.push('facts.semgrep.ruleFacts must be an object mapping rule ids to fact names');
+    }
+  }
+
   for (const check of config.verification?.checks ?? []) {
     if (typeof check.name !== 'string' || check.name === '') problems.push('verification.checks[].name is required');
     if (typeof check.command !== 'string' || check.command === '') {

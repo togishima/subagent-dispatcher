@@ -122,6 +122,108 @@ Rules the validator enforces:
 - every named deterministic predicate exists in the registry
 - every semantic node has a resolvable safer branch
 
+## Code facts
+
+A policy can route on facts derived from the code itself, not just from what the
+caller said about it. Facts are collected once, before routing, by the fact layer
+in `src/facts/`; traversal only ever reads them.
+
+```text
+Semgrep as verifier:         worker runs → semgrep checks the result → PASS / FAIL
+Semgrep as fact extractor:   before routing → semgrep derives code facts → the policy uses them
+```
+
+Those are separate uses and both still work. A Semgrep invocation listed under
+`verification.checks` judges a finished result; the fact layer described here
+produces evidence for a decision that has not been made yet. Neither replaces
+the other.
+
+Facts are off by default. Turn them on per repository:
+
+```json
+{
+  "facts": {
+    "semgrep": {
+      "enabled": true,
+      "config": ".semgrep/dispatcher.yml",
+      "timeoutMs": 10000,
+      "ruleFacts": {}
+    }
+  }
+}
+```
+
+Semgrep is the external CLI, never an npm dependency. With `enabled` false — the
+shipped default — it is never invoked and routing is exactly what it was.
+
+### Naming a fact
+
+A rule says which logical fact it stands for, in its own metadata:
+
+```yaml
+rules:
+  - id: auth-sensitive-change
+    languages: [typescript]
+    pattern: ...
+    message: Authentication-sensitive code
+    severity: WARNING
+    metadata:
+      dispatcher:
+        fact: auth_sensitive
+```
+
+which normalizes to `auth_sensitive` in `codeFacts.matched`.
+
+Rule metadata is the preferred convention: the rule and the fact it means travel
+together, so renaming a rule cannot silently break a policy. It only works for
+rules you own, though, and it depends on Semgrep echoing nested custom metadata
+back under `extra.metadata` — which current versions do, but which is not part of
+any stability promise. So `facts.semgrep.ruleFacts` is also supported and takes
+precedence:
+
+```json
+{ "ruleFacts": { "r2c.owasp.sql-injection": "security_sensitive" } }
+```
+
+That covers rule packs you did not write and gives you an escape hatch if a
+Semgrep version stops carrying the metadata through. The tradeoff is that the
+mapping now lives away from the rule. What is deliberately not supported either
+way is a policy naming a Semgrep rule id: policies name facts, so a rule pack can
+be swapped without touching routing.
+
+A match that maps to no fact is counted but contributes nothing to routing.
+
+### The predicate
+
+```json
+{
+  "id": "auth_sensitive",
+  "type": "deterministic",
+  "predicate": "code_fact_present",
+  "args": { "facts": ["auth_sensitive"] },
+  "yes": { "tier": "high" },
+  "no": { "goto": "exact_mechanical" }
+}
+```
+
+`code_fact_present` is true when any requested fact was positively matched. It is
+false when the facts were collected and none matched — and also false when
+nothing could be collected, because unavailable evidence means unknown, not
+true and not false. A dispatcher with no Semgrep installed therefore routes
+exactly as it would have without the node.
+
+That asymmetry is the thing to design around: the `no` branch must lead to the
+route the policy would take anyway, not to a cheaper tier that only makes sense
+once you know the code is harmless. If you need to tell "looked, found nothing"
+from "nobody looked", `code_facts_available` says which of the two it was.
+
+Matched fact names also reach the semantic evaluator, as a flat list under
+`code_facts` in the routing state — names only, never source, findings, line
+contents or rule messages. Jev or Laya can reason from objective evidence without
+Semgrep becoming a classifier.
+
+`jev-dispatch facts` runs the fact layer on its own and prints what it found.
+
 ## The safer branch
 
 Below its confidence threshold, a semantic node takes the *safer* branch rather

@@ -91,6 +91,17 @@
     "uncertainCountsAsPass": true
   },
 
+  "facts": {
+    "$comment": "Deterministic evidence gathered once before routing, never from inside a policy predicate. Off by default: with enabled false the dispatcher behaves exactly as it did before, and Semgrep is never invoked. semgrep.config is resolved relative to the task's working directory, so each repository carries its own rules. Targets are the files the caller named as relevant context, falling back to the whole working directory when it named none — a full-repo scan rarely fits a routing budget, and the named files are what the subtask is about. A rule says which logical fact it stands for through metadata.dispatcher.fact; ruleFacts maps rule ids to fact names for rule packs you do not own, and wins over rule metadata. Policies name facts, never Semgrep rule ids.",
+    "semgrep": {
+      "enabled": false,
+      "binary": "semgrep",
+      "config": ".semgrep/dispatcher.yml",
+      "timeoutMs": 10000,
+      "ruleFacts": {}
+    }
+  },
+
   "verification": {
     "enabled": true,
     "timeoutMs": 300000,

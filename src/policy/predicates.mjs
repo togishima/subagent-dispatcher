@@ -93,6 +93,39 @@ export const PREDICATES = {
     return spec.hasPlan && spec.hasEditSites && (spec.hasAcceptanceCriteria || spec.hasExpectedOutput);
   },
 
+  // --- code-derived facts ----------------------------------------------------
+  // Facts are collected before routing by src/facts, so these predicates only
+  // read what is already on the input. Nothing here spawns Semgrep or touches
+  // the filesystem: evidence acquisition and evidence consumption are separate
+  // steps, and traversal only ever does the second.
+
+  /**
+   * True when any of `args.facts` was positively matched by a fact provider.
+   *
+   * Three states, two branches: a fact that was looked for and not found is
+   * `no`, and so is a fact nobody could look for, because unavailable evidence
+   * means unknown rather than true. That makes this predicate safe to consult
+   * on a machine without Semgrep — it simply never fires — and it is why the
+   * `no` branch of a node using it should lead to the route the policy would
+   * have taken anyway, not to the cheapest tier.
+   *
+   * An empty `args.facts` asks whether any fact at all was matched, the same way
+   * `risk_flag_present` does with no flags named.
+   */
+  code_fact_present: (input, args) => {
+    const matched = input.codeFacts?.matched;
+    if (!Array.isArray(matched) || matched.length === 0) return false;
+    const wanted = asArray(args.facts).map(String);
+    return wanted.length === 0 ? true : wanted.some((fact) => matched.includes(fact));
+  },
+
+  /**
+   * True when fact collection actually ran and produced an answer, matched or
+   * not. Lets a policy tell "no such code here" from "nobody looked", which the
+   * two branches of `code_fact_present` deliberately cannot express.
+   */
+  code_facts_available: (input) => input.codeFacts?.status === 'ok',
+
   /** True on any attempt after the first. */
   previous_attempt_failed: (input) => (input.attempt ?? 1) > 1,
 

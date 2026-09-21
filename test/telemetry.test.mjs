@@ -270,7 +270,7 @@ test('a database written before the rename opens and keeps its rows', () => {
   for (const kept of ['jev_latency_ms', 'jev_input_tokens', 'jev_output_tokens']) {
     assert.ok(columns.includes(kept), `${kept} must not be dropped`);
   }
-  assert.equal(store.queryOne("SELECT value FROM meta WHERE key = 'schema_version'").value, '2');
+  assert.equal(store.queryOne("SELECT value FROM meta WHERE key = 'schema_version'").value, '3');
 
   // Rows written before the rename came from Jev; they are attributed rather
   // than left unattributed and uncomparable.
