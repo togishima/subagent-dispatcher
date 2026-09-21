@@ -5,3 +5,4 @@ node_modules/
 *.db-shm
 .jev-dispatch/
 .claude/
+.tokensave/
