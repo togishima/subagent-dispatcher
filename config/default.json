@@ -102,6 +102,14 @@
     }
   },
 
+  "contextFilter": {
+    "$comment": "Decide, once per delegation and before routing, whether the caller's context summary is worth carrying to the worker. Off by default: with the jev evaluator it is one more network call per dispatch. The policy is data like the routing policy, resolved relative to your config directory first, and answers keep or drop; uncertainty falls to keep. The semantic evaluator is the one routing uses.",
+    "enabled": false,
+    "policy": "policies/context-filter-v1.json",
+    "defaultMinConfidence": 0.75,
+    "maxTraversalSteps": 32
+  },
+
   "verification": {
     "enabled": true,
     "timeoutMs": 300000,

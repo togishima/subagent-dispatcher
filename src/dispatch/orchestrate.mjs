@@ -5,6 +5,8 @@ import { verify, applicableChecks, summarizeVerification, failureExcerpt, VERDIC
 import { classifyAttempt, FAILURE } from './classify.mjs';
 import { normalizeRequest, specificationSignals } from './request.mjs';
 import { collectFacts } from '../facts/index.mjs';
+import { createEngine } from '../router/engines/index.mjs';
+import { filterContextItem, loadFilterPolicy } from '../context-filter/index.mjs';
 import { newId } from '../util/ids.mjs';
 import { log } from '../util/log.mjs';
 
@@ -21,6 +23,20 @@ export class Dispatcher {
     this.config = config;
     this.store = store;
     this.router = createRouter(config);
+    // The context filter is the decision core's second consumer. It borrows
+    // the evaluator routing is configured with, but it gets its own instance:
+    // the router does not expose its engine, and the filter must work when
+    // routing is fixed and creates none.
+    this.contextFilter = config.contextFilter?.enabled
+      ? {
+        policy: loadFilterPolicy({ path: config.contextFilter.policy, configDir: config.$configDir }),
+        engine: createEngine(config),
+        options: {
+          defaultMinConfidence: config.contextFilter.defaultMinConfidence,
+          maxTraversalSteps: config.contextFilter.maxTraversalSteps,
+        },
+      }
+      : null;
   }
 
   get policyVersion() {
@@ -47,8 +63,15 @@ export class Dispatcher {
     // its evidence out and the route is the one it would have been anyway.
     const codeFacts = await collectFacts(this.config, task, { signal: request.signal });
 
+    // Whether the caller's context summary is worth carrying, decided once and
+    // applied to every attempt. Routing still sees the unfiltered task: the
+    // filter must not change how completely the caller appears to have
+    // specified the work.
+    const contextFilter = await this.#filterContext(task, request.signal);
+    const workerTask = contextFilter?.value === 'drop' ? { ...task, contextSummary: null } : task;
+
     this.store?.openDelegation({
-      taskId, sessionId, task: task.task, taskType: task.taskType, specification, verificationAvailable, codeFacts,
+      taskId, sessionId, task: task.task, taskType: task.taskType, specification, verificationAvailable, codeFacts, contextFilter,
     });
 
     const maxAttempts = Math.max(1, this.config.escalation.maxAttemptsPerTask);
@@ -86,7 +109,7 @@ export class Dispatcher {
 
       const execution = await runWorker({
         worker: resolved.worker,
-        task: { ...task, attempt, previousFeedback: previous?.feedback ?? null },
+        task: { ...workerTask, attempt, previousFeedback: previous?.feedback ?? null },
         config: this.config,
         checks,
       });
@@ -116,7 +139,7 @@ export class Dispatcher {
       });
 
       if (outcome.success) {
-        return this.#finish({ taskId, attempts, escalated, status: 'completed', outcome, verification, specification, planProblems: task.planProblems });
+        return this.#finish({ taskId, attempts, escalated, status: 'completed', outcome, verification, specification, planProblems: task.planProblems, contextFilter });
       }
 
       const reason = outcome.failureReason;
@@ -141,7 +164,7 @@ export class Dispatcher {
         if (!next) {
           // Already at the strongest tier: a stronger worker is not available, so
           // retrying would only repeat the same failure at the same price.
-          return this.#finish({ taskId, attempts, escalated, status: 'failed', outcome, verification, specification, planProblems: task.planProblems });
+          return this.#finish({ taskId, attempts, escalated, status: 'failed', outcome, verification, specification, planProblems: task.planProblems, contextFilter });
         }
         escalatedTo = next;
         escalated = true;
@@ -161,7 +184,7 @@ export class Dispatcher {
       }
 
       const status = reason === FAILURE.SPEC ? 'needs_clarification' : 'failed';
-      return this.#finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems: task.planProblems });
+      return this.#finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems: task.planProblems, contextFilter });
     }
 
     const last = attempts[attempts.length - 1];
@@ -169,8 +192,33 @@ export class Dispatcher {
       taskId, attempts, escalated, status: 'failed',
       outcome: last?.outcome ?? { failureReason: FAILURE.UNKNOWN, detail: 'retry budget exhausted' },
       verification: { verdict: VERDICT.UNCERTAIN, reason: 'retry budget exhausted', checks: [] },
-      specification, planProblems: task.planProblems,
+      specification, planProblems: task.planProblems, contextFilter,
     });
+  }
+
+  /**
+   * One item: the context summary. The files a caller names are paths, and
+   * paths do not go to an evaluator (see src/context-filter/state.mjs); the
+   * plan, the edit sites and the criteria are the instruction, not context.
+   * A filter that cannot answer keeps the summary, like a router that cannot
+   * answer takes the safer branch.
+   */
+  async #filterContext(task, signal) {
+    if (!this.contextFilter || !task.contextSummary) return null;
+    const { policy, engine, options } = this.contextFilter;
+    const item = { kind: 'context', summary: task.contextSummary };
+    const result = await filterContextItem({ policy, engine, task: task.task, item }, { ...options, signal });
+    if (result.error) log.warn('context filter could not evaluate; keeping the summary', { error: result.error });
+    else if (result.value === 'drop') log.info('context summary dropped', { reason: result.reason });
+    return {
+      policyVersion: policy.version,
+      value: result.value,
+      reason: result.reason,
+      semanticSkipped: result.semanticSkipped,
+      engine: result.engine,
+      error: result.error,
+      trail: result.trail,
+    };
   }
 
   /** Feedback for the next attempt: the verifier's own words, never a pep talk. */
@@ -186,7 +234,7 @@ export class Dispatcher {
     return parts.join('\n');
   }
 
-  #finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems }) {
+  #finish({ taskId, attempts, escalated, status, outcome, verification, specification, planProblems, contextFilter }) {
     const last = attempts[attempts.length - 1];
     const success = status === 'completed';
     const summary = {
@@ -226,7 +274,9 @@ export class Dispatcher {
       needsClarification: status === 'needs_clarification',
       failureReason: summary.failureReason,
       ...(hint ? { hint } : {}),
-      $internal: { summary, attempts },
+      // The caller learns that its summary was left out, not who decided.
+      ...(contextFilter?.value === 'drop' ? { contextOmitted: true } : {}),
+      $internal: { summary, attempts, contextFilter },
     };
   }
 }

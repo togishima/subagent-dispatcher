@@ -188,6 +188,20 @@ function validate(config) {
     }
   }
 
+  // Context filtering is optional too, and its policy is read at startup, so a
+  // bad path fails here rather than on the first delegation.
+  const contextFilter = config.contextFilter ?? {};
+  if (contextFilter.enabled) {
+    if (typeof contextFilter.policy !== 'string' || contextFilter.policy === '') {
+      problems.push('contextFilter.policy must be a path to a policy file');
+    }
+    const min = contextFilter.defaultMinConfidence;
+    if (min != null && !(min >= 0 && min <= 1)) problems.push('contextFilter.defaultMinConfidence must be between 0 and 1');
+    if (contextFilter.maxTraversalSteps != null && !(contextFilter.maxTraversalSteps >= 1)) {
+      problems.push('contextFilter.maxTraversalSteps must be >= 1');
+    }
+  }
+
   for (const check of config.verification?.checks ?? []) {
     if (typeof check.name !== 'string' || check.name === '') problems.push('verification.checks[].name is required');
     if (typeof check.command !== 'string' || check.command === '') {

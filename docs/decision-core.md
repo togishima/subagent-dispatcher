@@ -36,8 +36,10 @@ the same question identically on a later request.
 
 ## Two consumers, one mechanism
 
-These are the two consumers in the repository, not proposed integrations. The
-routing column describes the shipped three-tier configuration and policies.
+These are the two consumers in the repository, and both run inside a
+delegation. The routing column describes the shipped three-tier configuration
+and policies. The filter is off by default (`contextFilter.enabled`) because
+with the Jev evaluator it is one more network call per dispatch.
 
 | | Use case A: model routing | Use case B: context filtering |
 |---|---|---|
@@ -48,10 +50,22 @@ routing column describes the shipped three-tier configuration and policies.
 | Policies | `policies/v1.json`, `policies/v2.json` | `policies/context-filter-v1.json` |
 
 Both use the same graph validation, deterministic predicate dispatch, safer
-branch handling and traversal. The context filter's source totals 55 lines:
-37 in `src/context-filter/index.mjs` and 18 in `src/context-filter/state.mjs`,
-including comments and blank lines. Its application work is to select the
-state sent to an injected evaluator and return the decision.
+branch handling and traversal. The context filter's source totals 68 lines:
+50 in `src/context-filter/index.mjs` and 18 in `src/context-filter/state.mjs`,
+including comments, blank lines and the exported vocabulary. Its application
+work is to select the state sent to an injected evaluator and return the
+decision.
+
+`src/dispatch/orchestrate.mjs` calls it once per delegation, after fact
+collection and before the first route, on one item: the caller's context
+summary, as `{ kind: 'context', summary }`. The files a caller names are paths
+and stay out for the reason given below; the plan, edit sites and acceptance
+criteria are the instruction rather than context and are never candidates.
+Routing reads the unfiltered task, so the filter cannot change how completely
+the caller appears to have specified the work; only the prompt handed to the
+worker loses the summary, on every attempt. The caller is told
+`contextOmitted: true` and nothing about who decided; the decision and its
+trail go to telemetry as `delegations.context_filter`, without the summary.
 
 That selection is an allowlist of `kind` and `summary`, so a field added to an
 item later cannot reach an evaluator by accident. The item's id is excluded
