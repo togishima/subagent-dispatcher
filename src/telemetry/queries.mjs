@@ -419,7 +419,8 @@ export function exportForPolicyAuthoring(store, { since = null, limit = 5000 } =
     `SELECT task_id, created_at, routing_mode, policy_version, router, task_hash, title, task_type,
             attempt_count, first_route_tier, final_tier, final_worker, first_route_success,
             final_status, final_success, unverified, escalated, frontier_used, final_failure_reason,
-            total_cost_usd, routing_latency_ms
+            total_cost_usd, routing_latency_ms,
+            code_facts, code_fact_count, semgrep_status
      FROM delegations WHERE ${FINISHED}${win} ORDER BY created_at DESC LIMIT ?`,
     [...params, limit],
   );

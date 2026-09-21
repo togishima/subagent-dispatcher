@@ -13,7 +13,7 @@ import {
 } from './privacy.mjs';
 
 const SCHEMA_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'schema.sql');
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
 
 const bool = (value) => (value ? 1 : 0);
 const json = (value) => (value == null ? null : JSON.stringify(value));
@@ -51,6 +51,20 @@ export class TelemetryStore {
    * keeps its rows, which matters because those rows are experiment results.
    */
   migrate() {
+    const delegationColumns = new Set(
+      this.db.prepare('PRAGMA table_info(delegations)').all().map((row) => row.name),
+    );
+    const delegationAdditions = [
+      ['code_facts', 'TEXT'],
+      ['code_fact_count', 'INTEGER DEFAULT 0'],
+      ['semgrep_status', 'TEXT'],
+      ['semgrep_match_count', 'INTEGER DEFAULT 0'],
+      ['semgrep_latency_ms', 'INTEGER DEFAULT 0'],
+    ].filter(([name]) => !delegationColumns.has(name));
+    for (const [name, type] of delegationAdditions) {
+      this.db.exec(`ALTER TABLE delegations ADD COLUMN ${name} ${type}`);
+    }
+
     const columns = new Set(this.db.prepare('PRAGMA table_info(dispatches)').all().map((row) => row.name));
     const additions = [
       ['evaluator_provider', 'TEXT'],
@@ -136,16 +150,23 @@ export class TelemetryStore {
 
   // --------------------------------------------------------------- delegations
 
-  openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable }) {
+  openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable, codeFacts }) {
     // Specification signals are counts and flags, never the plan text itself.
     const spec = specification ?? {};
+    // Code facts are recorded by name, because a routing decision is only
+    // reproducible from what the router actually read — a count would not
+    // reconstruct the route. Names are operator-chosen labels; the Semgrep
+    // output they came from is never stored, here or anywhere.
+    const facts = codeFacts ?? {};
+    const factNames = Array.isArray(facts.matched) ? facts.matched : [];
     this.db
       .prepare(
         `INSERT INTO delegations (
            task_id, created_at, session_id, routing_mode, task_hash, title, task_type,
            has_plan, plan_chars, plan_document_count, has_acceptance_criteria,
-           has_edit_sites, has_constraints, fully_specified, verification_available, raw_task
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           has_edit_sites, has_constraints, fully_specified, verification_available,
+           code_facts, code_fact_count, semgrep_status, semgrep_match_count, semgrep_latency_ms, raw_task
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         taskId,
@@ -163,6 +184,11 @@ export class TelemetryStore {
         bool(spec.hasConstraints),
         bool(spec.hasPlan && spec.hasEditSites && (spec.hasAcceptanceCriteria || spec.hasExpectedOutput)),
         bool(verificationAvailable),
+        factNames.length > 0 ? json(factNames) : null,
+        factNames.length,
+        facts.semgrep?.status ?? facts.status ?? null,
+        facts.semgrep?.matchCount ?? 0,
+        facts.semgrep?.latencyMs ?? 0,
         rawTaskIfEnabled(task, this.config),
       );
   }

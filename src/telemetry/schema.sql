@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS delegations (
   has_constraints           INTEGER DEFAULT 0,
   fully_specified           INTEGER DEFAULT 0,
   verification_available    INTEGER DEFAULT 0,
+  -- Deterministic code facts that were routing input. Logical fact names only,
+  -- chosen by whoever wrote the rules: no source, no findings, no rule text.
+  code_facts                TEXT,
+  code_fact_count           INTEGER DEFAULT 0,
+  semgrep_status            TEXT,
+  semgrep_match_count       INTEGER DEFAULT 0,
+  semgrep_latency_ms        INTEGER DEFAULT 0,
   attempt_count             INTEGER DEFAULT 0,
   first_route_tier          TEXT,
   final_tier                TEXT,

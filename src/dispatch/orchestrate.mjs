@@ -4,6 +4,7 @@ import { runWorker } from '../worker/run.mjs';
 import { verify, applicableChecks, summarizeVerification, failureExcerpt, VERDICT } from '../verify/index.mjs';
 import { classifyAttempt, FAILURE } from './classify.mjs';
 import { normalizeRequest, specificationSignals } from './request.mjs';
+import { collectFacts } from '../facts/index.mjs';
 import { newId } from '../util/ids.mjs';
 import { log } from '../util/log.mjs';
 
@@ -40,8 +41,14 @@ export class Dispatcher {
     const checks = applicableChecks(this.config, task);
     const verificationAvailable = checks.length > 0;
 
+    // Deterministic evidence about the code itself, gathered once here rather
+    // than inside a predicate: routing reads facts, it does not acquire them.
+    // Collection never fails a dispatch — a provider that cannot answer leaves
+    // its evidence out and the route is the one it would have been anyway.
+    const codeFacts = await collectFacts(this.config, task, { signal: request.signal });
+
     this.store?.openDelegation({
-      taskId, sessionId, task: task.task, taskType: task.taskType, specification, verificationAvailable,
+      taskId, sessionId, task: task.task, taskType: task.taskType, specification, verificationAvailable, codeFacts,
     });
 
     const maxAttempts = Math.max(1, this.config.escalation.maxAttemptsPerTask);
@@ -56,6 +63,7 @@ export class Dispatcher {
         ...task,
         specification,
         verificationAvailable,
+        codeFacts,
         attempt,
         previousTier: previous?.tier ?? null,
         previousFailureReason: previous?.failureReason ?? null,

@@ -17,6 +17,13 @@ export function buildRoutingState(input, stateOptions = {}) {
     deterministic_verification_available: Boolean(input.verificationAvailable),
     risk_flags: input.riskFlags?.length ? input.riskFlags : null,
     relevant_file_count: input.contextFiles?.length ?? null,
+    // Objective evidence about the code, as logical fact names only. No source,
+    // no findings, no rule messages, no line contents — a normalized name like
+    // "auth_sensitive" is an operator-chosen label, which is what makes it safe
+    // to hand to a remote evaluator under the same rules as everything else
+    // here. Omitted entirely when nothing matched, so an evaluator is never
+    // asked to read anything into an empty list.
+    code_facts: input.codeFacts?.matched?.length ? [...input.codeFacts.matched] : null,
   };
 
   // Judging whether a plan is concrete enough to follow means reading it, so the

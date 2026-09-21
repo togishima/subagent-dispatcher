@@ -527,6 +527,29 @@ traversal
    4. high_stakes_judgment   semantic       yes  conf=0.81   tier high
 ```
 
+### Code facts from Semgrep
+
+A policy can also route on facts derived from the code, not just from what the
+caller said about it. If Semgrep is installed and configured, it runs **once,
+before routing**, and its matches are normalized into logical fact names a
+predicate can read:
+
+```json
+{ "predicate": "code_fact_present", "args": { "facts": ["auth_sensitive"] } }
+```
+
+Semgrep never runs from inside traversal — evidence acquisition and evidence
+consumption are separate steps, which is what keeps a routing decision
+reproducible from the facts recorded next to it. It is optional, off by default,
+and uses the external CLI rather than an npm dependency. When it is missing,
+times out or fails, the result is *unknown*: the predicate is false, nothing is
+routed upward for it, and routing is exactly what it was without it.
+
+Only fact names reach telemetry and the semantic evaluator — never source, rule
+messages, findings or line contents. `jev-dispatch facts` shows what the fact
+layer sees here. `docs/policy-authoring.md` has the rule metadata convention and
+the distinction from Semgrep-as-a-verification-check.
+
 ### Authoring a new policy
 
 Runtime routing and policy improvement are separate on purpose. A frontier model
@@ -744,6 +767,7 @@ jev-dispatch evaluators                list the semantic engines and which is se
 jev-dispatch check-evaluator           run one real evaluation through the selected engine
 jev-dispatch policy                    print the active routing policy
 jev-dispatch predicates                list deterministic predicates
+jev-dispatch facts                     collect deterministic code facts here and print them
 jev-dispatch status                    headline metrics as JSON
 jev-dispatch compare                   one row per experiment arm
 jev-dispatch export [--since <hours>]  historical decisions for offline authoring
