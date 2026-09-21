@@ -54,12 +54,14 @@ const isFactName = (value) => typeof value === 'string' && value.trim() !== '';
  * together, and the name written in the rule is the name that arrives.
  *
  * `ruleFacts` is keyed on `check_id`, which is *not* the `id:` in the rule file:
- * Semgrep prefixes it with the rules file's directory path relative to the scan
- * directory (`.semgrep/rules.yml` → `semgrep.<id>`). A mapping written from the
- * rule file alone therefore never matches, and never says so — which is why it
- * is the fallback here rather than the recommended path. Matching on the raw id
- * instead is not a fix: it would make two rules of the same name in different
- * packs indistinguishable.
+ * Semgrep prefixes it with the rules file's directory relative to the scan
+ * directory, dots for separators, leading dot of the result dropped — so
+ * `.semgrep/rules.yml` gives `semgrep.<id>` rather than `.semgrep.<id>`, and a
+ * directory whose own name contains a dot is not escaped at all. A mapping
+ * written from the rule file therefore never matches, and never says so, which
+ * is why this is the fallback rather than the recommended path. Matching on the
+ * raw id instead is not a fix: it would make two rules of the same name in
+ * different packs indistinguishable.
  *
  * Neither source is required: a match that maps to no fact is still counted but
  * contributes nothing to routing. What is deliberately *not* supported is a

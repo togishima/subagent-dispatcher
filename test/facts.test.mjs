@@ -159,6 +159,8 @@ test('ruleFacts is keyed on the check id Semgrep emits, not the rule file id', a
   // directory, so `.semgrep/dispatcher.yml` yields `semgrep.<id>`. A mapping
   // written from the rule file alone matches nothing and reports no error, which
   // is the whole reason metadata is the recommended mechanism.
+  // `.semgrep/dispatcher.yml` is the shipped default, and a dot directory: the
+  // leading dot is dropped, so the key is `semgrep.<id>`, not `.semgrep.<id>`.
   const emitted = semgrepJson([match('semgrep.auth-sensitive-change', undefined)]);
 
   const fromRuleFile = await runSemgrep(
@@ -168,6 +170,12 @@ test('ruleFacts is keyed on the check id Semgrep emits, not the rule file id', a
   assert.equal(fromRuleFile.status, FACT_STATUS.OK, 'a key that misses is not an error');
   assert.deepEqual(fromRuleFile.facts, [], 'the bare rule id does not match the check id');
   assert.equal(fromRuleFile.matchCount, 1, 'the match is still counted, it just names no fact');
+
+  const withLeadingDot = await runSemgrep(
+    { cwd: root, ruleFacts: { '.semgrep.auth-sensitive-change': 'auth_sensitive' } },
+    { spawn: fakeSpawn({ stdout: emitted }) },
+  );
+  assert.deepEqual(withLeadingDot.facts, [], 'the dot directory keeps no leading dot');
 
   const fromCheckId = await runSemgrep(
     { cwd: root, ruleFacts: { 'semgrep.auth-sensitive-change': 'auth_sensitive' } },
