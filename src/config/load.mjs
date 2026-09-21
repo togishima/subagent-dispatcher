@@ -181,7 +181,10 @@ function validate(config) {
       problems.push('facts.semgrep.config must be a path to a Semgrep rules file, or null');
     }
     if (semgrep.ruleFacts != null && !isPlainObject(semgrep.ruleFacts)) {
-      problems.push('facts.semgrep.ruleFacts must be an object mapping rule ids to fact names');
+      problems.push(
+        "facts.semgrep.ruleFacts must be an object mapping Semgrep check ids to fact names "
+        + '(the check id, not the rule file\'s "id:" — see docs/policy-authoring.md)',
+      );
     }
   }
 
