@@ -64,7 +64,14 @@ function decision(fields) {
 // ---------------------------------------------------------------- policy-graph
 
 registerRouter('policy-graph', (config) => {
-  const policy = loadPolicy(config);
+  const values = orderedTiers(config);
+  const policy = loadPolicy({
+    values,
+    fallback: values[Math.min(1, values.length - 1)],
+    graph: config.routing.policyGraph.graph,
+    path: config.routing.policyGraph.path,
+    configDir: config.$configDir,
+  });
   const semantic = semanticNodes(policy);
   const options = config.routing.policyGraph;
   // The graph does not know which engine answers its questions, and must not:

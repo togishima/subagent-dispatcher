@@ -1,34 +1,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseYaml } from '../config/yaml.mjs';
+import { parseYaml } from '../util/yaml.mjs';
 import { pluginRoot } from '../util/paths.mjs';
 import { PREDICATES } from './predicates.mjs';
-import { orderedTiers } from '../config/load.mjs';
+import { policyOptions } from './compat.mjs';
 
 /**
- * A routing policy is a small decision graph held as data, not code. Each node
+ * A decision policy is a small decision graph held as data, not code. Each node
  * asks one boolean question — deterministic (ordinary code) or semantic (Jev) —
- * and each branch either jumps to another node or names a worker tier.
+ * and each branch either jumps to another node or names a terminal value.
  *
  * This is deliberately not a general rule or DAG engine: nodes are boolean, edges
  * are `yes`/`no`, the graph must be acyclic, and traversal is a plain loop.
  */
 
-export function resolvePolicyPath(config) {
-  const configured = config.routing.policyGraph.path;
+export function resolvePolicyPath(options) {
+  const { path: configured, configDir } = policyOptions(options);
   if (path.isAbsolute(configured)) return configured;
   // Resolve relative to the user's config directory first, then the plugin.
   const candidates = [
-    config.$configDir ? path.join(config.$configDir, configured) : null,
+    configDir ? path.join(configDir, configured) : null,
     path.join(pluginRoot, configured),
   ].filter(Boolean);
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[candidates.length - 1];
 }
 
-export function loadPolicy(config) {
-  const inline = config.routing.policyGraph.graph;
-  if (inline) return validatePolicy(inline, config, '<inline>');
-  const file = resolvePolicyPath(config);
+export function loadPolicy(options) {
+  options = policyOptions(options);
+  const inline = options.graph;
+  if (inline) return validatePolicy(inline, options, '<inline>');
+  const file = resolvePolicyPath(options);
   let raw;
   try {
     const text = fs.readFileSync(file, 'utf8');
@@ -36,30 +37,53 @@ export function loadPolicy(config) {
   } catch (error) {
     throw new Error(`failed to read routing policy ${file}: ${error.message}`);
   }
-  const policy = validatePolicy(raw, config, file);
+  const policy = validatePolicy(raw, options, file);
   policy.$source = file;
   return policy;
 }
 
 const BRANCHES = ['yes', 'no'];
 
-export function validatePolicy(raw, config, source = '<inline>') {
+export function validatePolicy(raw, options, source = '<inline>') {
   const problems = [];
-  const tiers = orderedTiers(config);
-  const tierOrder = new Map(tiers.map((tier, index) => [tier, index]));
+  const { values, fallback: defaultFallback } = policyOptions(options) ?? {};
+  if (!Array.isArray(values) || values.length === 0
+      || values.some((value) => typeof value !== 'string' || value === '')
+      || new Set(values).size !== values.length) {
+    throw new Error('policy values must be a non-empty ordered list of unique non-empty strings');
+  }
+  const valueOrder = new Map(values.map((value, index) => [value, index]));
+  const fallback = raw.fallback ?? raw.fallbackTier ?? defaultFallback;
 
   if (typeof raw.version !== 'string' || raw.version === '') problems.push('version must be a non-empty string');
   if (!Array.isArray(raw.nodes) || raw.nodes.length === 0) problems.push('nodes must be a non-empty array');
 
   const nodes = new Map();
+  const terminalKeys = new WeakMap();
   for (const node of raw.nodes ?? []) {
     if (typeof node.id !== 'string' || node.id === '') { problems.push('every node needs a string id'); continue; }
     if (nodes.has(node.id)) problems.push(`duplicate node id "${node.id}"`);
-    nodes.set(node.id, node);
+    const normalized = { ...node };
+    for (const branch of BRANCHES) {
+      const edge = node[branch];
+      if (!edge || typeof edge !== 'object') continue;
+      const { tier, ...canonical } = edge;
+      terminalKeys.set(canonical, edge.value === undefined && tier !== undefined ? 'tier' : 'value');
+      if (tier !== undefined && canonical.value !== undefined && tier !== canonical.value) {
+        problems.push(`node "${node.id}".${branch}: value and tier aliases disagree`);
+      }
+      if (canonical.value === undefined && tier !== undefined) canonical.value = tier;
+      normalized[branch] = canonical;
+    }
+    nodes.set(node.id, normalized);
   }
 
-  if (raw.fallbackTier && !tierOrder.has(raw.fallbackTier)) {
-    problems.push(`fallbackTier "${raw.fallbackTier}" is not a defined tier`);
+  if (!valueOrder.has(fallback)) {
+    problems.push(`fallback "${fallback}" must be an explicitly defined value`);
+  }
+  if (raw.fallback !== undefined && raw.fallbackTier !== undefined
+      && raw.fallback !== raw.fallbackTier) {
+    problems.push('fallback and fallbackTier aliases disagree');
   }
   const entry = raw.entry ?? raw.nodes?.[0]?.id;
   if (!nodes.has(entry)) problems.push(`entry "${entry}" is not a node`);
@@ -84,15 +108,16 @@ export function validatePolicy(raw, config, source = '<inline>') {
       const edge = node[branch];
       if (!edge || typeof edge !== 'object') { problems.push(`node "${node.id}": missing "${branch}" branch`); continue; }
       const hasGoto = typeof edge.goto === 'string';
-      const hasTier = typeof edge.tier === 'string';
-      if (hasGoto === hasTier) {
-        problems.push(`node "${node.id}".${branch} must set exactly one of "goto" or "tier"`);
+      const hasValue = typeof edge.value === 'string';
+      if (hasGoto === hasValue) {
+        problems.push(`node "${node.id}".${branch} must set exactly one of "goto" or "value"`);
       }
       if (hasGoto && !nodes.has(edge.goto)) {
         problems.push(`node "${node.id}".${branch}.goto "${edge.goto}" is not a node`);
       }
-      if (hasTier && !tierOrder.has(edge.tier)) {
-        problems.push(`node "${node.id}".${branch}.tier "${edge.tier}" is not a defined tier`);
+      if (hasValue && !valueOrder.has(edge.value)) {
+        const key = terminalKeys.get(edge);
+        problems.push(`node "${node.id}".${branch}.${key} "${edge.value}" is not a defined ${key}`);
       }
     }
   }
@@ -106,7 +131,8 @@ export function validatePolicy(raw, config, source = '<inline>') {
     version: raw.version,
     description: raw.description ?? '',
     entry,
-    fallbackTier: raw.fallbackTier ?? tiers[Math.min(1, tiers.length - 1)],
+    fallback,
+    get fallbackTier() { return this.fallback; }, // Compatibility alias for the legacy CLI.
     nodes,
     source,
   };
@@ -117,7 +143,7 @@ export function validatePolicy(raw, config, source = '<inline>') {
     // rather than silently under-routing at 3am.
     for (const node of nodes.values()) {
       if (node.type !== 'semantic') continue;
-      const derived = saferBranch(policy, node, tierOrder);
+      const derived = saferBranch(policy, node, valueOrder);
       if (node.onUncertain) {
         node.$safer = node.onUncertain;
         node.$saferSource = 'declared';
@@ -126,7 +152,7 @@ export function validatePolicy(raw, config, source = '<inline>') {
         node.$saferSource = 'derived';
       } else {
         problems.push(
-          `node "${node.id}": both branches reach the same tier range, so the safer branch cannot be derived — set "onUncertain" explicitly`,
+          `node "${node.id}": both branches reach the same value range, so the safer branch cannot be derived — set "onUncertain" explicitly`,
         );
       }
     }
@@ -177,10 +203,10 @@ function findUnreachable(nodes, entry) {
     .map((id) => `node "${id}" is unreachable from entry`);
 }
 
-/** The tier range a branch can end at, as [minOrder, maxOrder]. */
-function reachableRange(policy, edge, tierOrder, seen = new Set()) {
-  if (edge.tier) {
-    const order = tierOrder.get(edge.tier);
+/** The value range a branch can end at, as [minOrder, maxOrder]. */
+function reachableRange(policy, edge, valueOrder, seen = new Set()) {
+  if (edge.value) {
+    const order = valueOrder.get(edge.value);
     return [order, order];
   }
   if (seen.has(edge.goto)) return [Infinity, -Infinity];
@@ -189,7 +215,7 @@ function reachableRange(policy, edge, tierOrder, seen = new Set()) {
   let min = Infinity;
   let max = -Infinity;
   for (const branch of BRANCHES) {
-    const [innerMin, innerMax] = reachableRange(policy, node[branch], tierOrder, seen);
+    const [innerMin, innerMax] = reachableRange(policy, node[branch], valueOrder, seen);
     min = Math.min(min, innerMin);
     max = Math.max(max, innerMax);
   }
@@ -197,13 +223,13 @@ function reachableRange(policy, edge, tierOrder, seen = new Set()) {
 }
 
 /**
- * Which branch over-routes? The one whose reachable tiers are strictly higher.
+ * Which branch over-routes? The one whose reachable values have strictly higher indexes.
  * Returns null when the two branches are indistinguishable, so the policy author
  * has to say which way to fall.
  */
-export function saferBranch(policy, node, tierOrder) {
-  const [yesMin, yesMax] = reachableRange(policy, node.yes, tierOrder);
-  const [noMin, noMax] = reachableRange(policy, node.no, tierOrder);
+export function saferBranch(policy, node, valueOrder) {
+  const [yesMin, yesMax] = reachableRange(policy, node.yes, valueOrder);
+  const [noMin, noMax] = reachableRange(policy, node.no, valueOrder);
   if (yesMin !== noMin) return yesMin > noMin ? 'yes' : 'no';
   if (yesMax !== noMax) return yesMax > noMax ? 'yes' : 'no';
   return null;
