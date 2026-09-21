@@ -1,0 +1,36 @@
+{
+  "version": "context-filter-v1",
+  "description": "Keep explicit constraints, drop summaries explicitly marked obsolete, and evaluate relevance otherwise. Values are ordered drop then keep: retaining uncertain context is safer than losing useful context, so fallback is keep.",
+  "entry": "explicit_constraint",
+  "fallback": "keep",
+  "nodes": [
+    {
+      "id": "explicit_constraint",
+      "type": "deterministic",
+      "predicate": "item_kind_is",
+      "args": { "values": ["constraint"] },
+      "yes": { "value": "keep" },
+      "no": { "goto": "explicitly_obsolete" }
+    },
+    {
+      "id": "explicitly_obsolete",
+      "type": "deterministic",
+      "predicate": "item_matches",
+      "args": { "patterns": ["^\\[obsolete\\]"] },
+      "yes": { "value": "drop" },
+      "no": { "goto": "item_relevant" }
+    },
+    {
+      "id": "item_relevant",
+      "type": "semantic",
+      "question": "Does the context item, described by item.kind and item.summary, contain information useful for completing task?",
+      "criteria": {
+        "true": "The context item contains information relevant to the task.",
+        "false": "The context item is unrelated to the task and can be omitted."
+      },
+      "minConfidence": 0.75,
+      "yes": { "value": "keep" },
+      "no": { "value": "drop" }
+    }
+  ]
+}
