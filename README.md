@@ -554,6 +554,20 @@ messages, findings or line contents. `jev-dispatch facts` shows what the fact
 layer sees here. `docs/policy-authoring.md` has the rule metadata convention and
 the distinction from Semgrep-as-a-verification-check.
 
+### Filtering the context summary
+
+The same decision core has a second consumer. With `contextFilter.enabled`,
+the `context` a caller passes is judged once per delegation — before routing,
+by `policies/context-filter-v1.json` — and either carried to the worker or left
+out. Explicit constraints are always kept, a summary starting with
+`[obsolete]` is always dropped, and anything else is a semantic question for
+the evaluator routing already uses, with uncertainty falling toward *keep*.
+The caller sees `contextOmitted: true` when it happened; the decision and its
+trail land in telemetry, the summary itself does not. It is off by default
+because with Jev it is one more network call per dispatch.
+`docs/decision-core.md` explains why this is the evidence that the policy
+engine is a decision core rather than a router.
+
 ### Authoring a new policy
 
 Runtime routing and policy improvement are separate on purpose. A frontier model
@@ -701,6 +715,11 @@ routing:
     timeoutMs: 8000
     sendPlan: true                        # the plan is needed to judge whether it is followable
     maxPlanChars: 4000
+
+contextFilter:
+  enabled: false                          # judge the caller's context summary before routing
+  policy: policies/context-filter-v1.json
+  defaultMinConfidence: 0.75              # below this, keep
 
 workerDefaults:
   permissionMode: acceptEdits

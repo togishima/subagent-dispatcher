@@ -60,6 +60,7 @@ export class TelemetryStore {
       ['semgrep_status', 'TEXT'],
       ['semgrep_match_count', 'INTEGER DEFAULT 0'],
       ['semgrep_latency_ms', 'INTEGER DEFAULT 0'],
+      ['context_filter', 'TEXT'],
     ].filter(([name]) => !delegationColumns.has(name));
     for (const [name, type] of delegationAdditions) {
       this.db.exec(`ALTER TABLE delegations ADD COLUMN ${name} ${type}`);
@@ -150,7 +151,7 @@ export class TelemetryStore {
 
   // --------------------------------------------------------------- delegations
 
-  openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable, codeFacts }) {
+  openDelegation({ taskId, sessionId, task, taskType, specification, verificationAvailable, codeFacts, contextFilter }) {
     // Specification signals are counts and flags, never the plan text itself.
     const spec = specification ?? {};
     // Code facts are recorded by name, because a routing decision is only
@@ -159,14 +160,27 @@ export class TelemetryStore {
     // output they came from is never stored, here or anywhere.
     const facts = codeFacts ?? {};
     const factNames = Array.isArray(facts.matched) ? facts.matched : [];
+    // The context filter's decision and trail, never the summary it judged.
+    const filter = contextFilter
+      ? {
+        policyVersion: contextFilter.policyVersion,
+        value: contextFilter.value,
+        reason: contextFilter.reason,
+        semanticSkipped: contextFilter.semanticSkipped,
+        engine: contextFilter.engine,
+        error: contextFilter.error,
+        trail: contextFilter.trail,
+      }
+      : null;
     this.db
       .prepare(
         `INSERT INTO delegations (
            task_id, created_at, session_id, routing_mode, task_hash, title, task_type,
            has_plan, plan_chars, plan_document_count, has_acceptance_criteria,
            has_edit_sites, has_constraints, fully_specified, verification_available,
-           code_facts, code_fact_count, semgrep_status, semgrep_match_count, semgrep_latency_ms, raw_task
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           code_facts, code_fact_count, semgrep_status, semgrep_match_count, semgrep_latency_ms, raw_task,
+           context_filter
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         taskId,
@@ -190,6 +204,7 @@ export class TelemetryStore {
         facts.semgrep?.matchCount ?? 0,
         facts.semgrep?.latencyMs ?? 0,
         rawTaskIfEnabled(task, this.config),
+        filter ? json(filter) : null,
       );
   }
 

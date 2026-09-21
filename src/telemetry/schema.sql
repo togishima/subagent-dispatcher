@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS delegations (
   semgrep_status            TEXT,
   semgrep_match_count       INTEGER DEFAULT 0,
   semgrep_latency_ms        INTEGER DEFAULT 0,
+  -- What the context filter decided about the caller's summary, with its
+  -- trail, as JSON. Never the summary itself.
+  context_filter            TEXT,
   attempt_count             INTEGER DEFAULT 0,
   first_route_tier          TEXT,
   final_tier                TEXT,

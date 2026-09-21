@@ -96,6 +96,15 @@ test('a non-loopback dashboard bind is refused', () => {
   assert.throws(() => testConfig({ ui: { host: '192.168.1.5' } }), /loopback/);
 });
 
+test('context filter settings are checked only when the filter is on', () => {
+  assert.equal(testConfig().contextFilter.enabled, false);
+  assert.doesNotThrow(() => testConfig({ contextFilter: { policy: '' } }));
+  assert.throws(() => testConfig({ contextFilter: { enabled: true, policy: '' } }), /contextFilter.policy/);
+  assert.throws(() => testConfig({ contextFilter: { enabled: true, defaultMinConfidence: 2 } }), /defaultMinConfidence/);
+  assert.throws(() => testConfig({ contextFilter: { enabled: true, maxTraversalSteps: 0 } }), /maxTraversalSteps/);
+  assert.equal(testConfig({ contextFilter: { enabled: true } }).contextFilter.policy, 'policies/context-filter-v1.json');
+});
+
 test('invalid configuration is rejected with a reason', () => {
   assert.throws(() => testConfig({ tiers: { low: { order: 1, worker: 'nope' } } }), /not defined under workers/);
   assert.throws(() => testConfig({ routing: { mode: 'nonsense' } }), /routing\.mode/);

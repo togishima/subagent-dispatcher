@@ -237,3 +237,88 @@ test('escalation is disabled by configuration, not by luck', async () => {
   assert.equal(result.escalated, false);
   store.close();
 });
+
+// --- context filter, wired in front of the attempt loop
+
+function contextFilterConfig(dir, { relevance }) {
+  const { config, successFile } = escalationConfig(dir);
+  // The stub records the prompt it received, so the test can see what the
+  // worker saw rather than what the dispatcher meant to send, and passes the
+  // verification check so the run ends at the first attempt.
+  const promptFile = path.join(dir, 'prompt');
+  stubWorker(
+    dir,
+    'low.js',
+    `const fs=require('fs');fs.writeFileSync(${JSON.stringify(promptFile)}, fs.readFileSync(0,'utf8'));` +
+      `fs.writeFileSync(${JSON.stringify(successFile)},'ok');` +
+      'process.stdout.write(JSON.stringify({status:"completed",summary:"stub",blockers:[]}));',
+  );
+  return {
+    promptFile,
+    config: testConfig({
+      ...JSON.parse(JSON.stringify({ routing: config.routing, workers: config.workers, workerDefaults: config.workerDefaults, verification: config.verification })),
+      routing: { ...config.routing, semanticEvaluator: { provider: 'mock', mock: { answers: { item_relevant: relevance } } } },
+      contextFilter: { enabled: true },
+    }),
+  };
+}
+
+test('a context summary the filter drops never reaches the worker, and routing input is untouched', async () => {
+  const dir = tempDir();
+  const { config, promptFile } = contextFilterConfig(dir, { relevance: 0.05 });
+  const store = new TelemetryStore(config, path.join(dir, 'telemetry.db'));
+  const result = await new Dispatcher(config, store).delegate({
+    task: 'do the thing', context: 'Unrelated history of another module', cwd: dir,
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.contextOmitted, true);
+  assert.ok(!('engine' in result), 'the caller does not learn which evaluator decided');
+  const prompt = fs.readFileSync(promptFile, 'utf8');
+  assert.ok(!prompt.includes('# Context'), 'dropped summary must not be in the worker prompt');
+  assert.ok(prompt.includes('# Subtask'));
+
+  const row = store.queryOne('SELECT context_filter FROM delegations');
+  const recorded = JSON.parse(row.context_filter);
+  assert.equal(recorded.value, 'drop');
+  assert.equal(recorded.engine, 'mock');
+  assert.ok(!row.context_filter.includes('Unrelated history'), 'the summary itself is never stored');
+  store.close();
+});
+
+test('a context summary the filter keeps reaches the worker as before', async () => {
+  const dir = tempDir();
+  const { config, promptFile } = contextFilterConfig(dir, { relevance: 0.95 });
+  const result = await new Dispatcher(config, null).delegate({
+    task: 'do the thing', context: 'The login redirect reads the return path from the query string', cwd: dir,
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal('contextOmitted' in result, false);
+  assert.ok(fs.readFileSync(promptFile, 'utf8').includes('# Context\n\nThe login redirect'));
+});
+
+test('a summary marked obsolete is dropped by the deterministic path, without asking the evaluator', async () => {
+  const dir = tempDir();
+  const { config } = contextFilterConfig(dir, { relevance: 0.95 });
+  const store = new TelemetryStore(config, path.join(dir, 'telemetry.db'));
+  const result = await new Dispatcher(config, store).delegate({
+    task: 'do the thing', context: '[obsolete] this was true before the refactor', cwd: dir,
+  });
+  assert.equal(result.contextOmitted, true);
+  const recorded = JSON.parse(store.queryOne('SELECT context_filter FROM delegations').context_filter);
+  assert.equal(recorded.value, 'drop');
+  assert.equal(recorded.semanticSkipped, true);
+  assert.equal(recorded.engine, null);
+  store.close();
+});
+
+test('without a context summary the filter is not consulted at all', async () => {
+  const dir = tempDir();
+  const { config } = contextFilterConfig(dir, { relevance: 0.05 });
+  const store = new TelemetryStore(config, path.join(dir, 'telemetry.db'));
+  const result = await new Dispatcher(config, store).delegate({ task: 'do the thing', cwd: dir });
+  assert.equal(result.status, 'completed');
+  assert.equal('contextOmitted' in result, false);
+  assert.equal(store.queryOne('SELECT context_filter FROM delegations').context_filter, null);
+  store.close();
+});
