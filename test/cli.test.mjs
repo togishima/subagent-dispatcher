@@ -44,6 +44,15 @@ test('every offline subcommand runs without crashing', async () => {
   }
 });
 
+test('the policy listing names every terminal branch it prints', async () => {
+  // Reading an edge is not a crash when the key moved, so the smoke test above
+  // stayed green while every terminating branch printed "undefined".
+  const result = await run(['policy']);
+  assert.equal(result.code, 0, result.stderr.slice(0, 400));
+  assert.equal(/undefined/.test(result.stdout), false, result.stdout.slice(0, 400));
+  assert.match(result.stdout, /(tier \w+|→ \w+)/);
+});
+
 test('doctor reports on a fresh install without a key', async () => {
   const result = await run(['doctor'], { TYPESAFE_API_KEY: '', CLAUDE_PLUGIN_OPTION_JEV_API_KEY: '' });
   assert.equal(crashed(result), false, result.stderr.slice(0, 400));

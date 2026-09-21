@@ -23,6 +23,20 @@ export const PREDICATES = {
   /** Always false. */
   never: () => false,
 
+  /** True when the item's kind is one of `args.values`. */
+  item_kind_is: (input, args) =>
+    Boolean(input.item?.kind) && asArray(args.values).map(String).includes(String(input.item.kind)),
+
+  /** Match only the item's summary, never task text or the item's body. */
+  item_matches: (input, args) =>
+    asArray(args.patterns).some((pattern) => {
+      try {
+        return new RegExp(pattern, args.flags ?? 'i').test(input.item?.summary ?? '');
+      } catch {
+        return false;
+      }
+    }),
+
   /**
    * True when some deterministic check can judge the result: either the caller
    * supplied a verification command, or a configured check applies to this task.

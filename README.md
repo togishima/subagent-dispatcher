@@ -469,6 +469,10 @@ The policy is data. Two versions ship: `v1` asks only what the work is like,
 `v2` (the default) asks first whether the caller already did the thinking. Both
 stay runnable so they can be compared.
 
+The same decision core also filters context with `drop` / `keep` values.
+[The decision core](docs/decision-core.md) explains what is shared and what
+remains specific to subagent dispatch.
+
 `policies/v2.json`, abridged:
 
 ```json

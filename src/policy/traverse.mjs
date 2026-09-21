@@ -12,7 +12,7 @@ export function traverse(policy, input, semanticAnswers, options = {}) {
 
   const trail = [];
   let nodeId = policy.entry;
-  let tier = null;
+  let value = null;
   let steps = 0;
 
   while (nodeId && steps < maxSteps) {
@@ -64,22 +64,24 @@ export function traverse(policy, input, semanticAnswers, options = {}) {
     const edge = node[branch];
     step.branch = branch;
     step.next = edge.goto ?? null;
-    step.tier = edge.tier ?? null;
+    step.value = edge.value ?? null;
+    step.tier = step.value; // Compatibility alias for telemetry.
     trail.push(step);
 
-    if (edge.tier) { tier = edge.tier; break; }
+    if (edge.value) { value = edge.value; break; }
     nodeId = edge.goto;
   }
 
-  if (!tier) {
+  if (!value) {
     return {
-      tier: policy.fallbackTier,
+      value: policy.fallback,
+      tier: policy.fallback, // Compatibility alias for legacy callers.
       trail,
       exhausted: true,
       reason: steps >= maxSteps ? 'traversal-step-limit' : 'no-terminal-branch',
     };
   }
-  return { tier, trail, exhausted: false, reason: 'policy-graph' };
+  return { value, tier: value, trail, exhausted: false, reason: 'policy-graph' };
 }
 
 /** The lowest confidence of any semantic step that actually decided the route. */

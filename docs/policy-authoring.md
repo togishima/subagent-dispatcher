@@ -80,6 +80,11 @@ different policies into one row and loses the comparison.
 
 ## Schema
 
+The canonical terminal key is `value`. `tier` remains accepted as a
+compatibility alias and is normalized to `value` at load time; declaring both
+with different values is a load-time error. The example below keeps the legacy
+spelling used by the shipped routing policies.
+
 ```jsonc
 {
   "version": "v2",                  // required, and unique per policy
@@ -116,7 +121,8 @@ different policies into one row and loses the comparison.
 Rules the validator enforces:
 
 - every node has both a `yes` and a `no` branch
-- each branch sets exactly one of `goto` (another node) or `tier` (terminate)
+- each branch sets exactly one of `goto` (another node) or `value` (terminate;
+  `tier` is accepted as an alias)
 - the graph is acyclic and every node is reachable from `entry`
 - every named tier exists in configuration
 - every named deterministic predicate exists in the registry
@@ -316,3 +322,9 @@ workers:
 `order` decides what "stronger" means, so it governs both escalation and safer-branch
 derivation. A `HUMAN` tier works the same way with a `command` worker that files
 a ticket and returns `needs_clarification`.
+
+The core's ordered values need not be tiers at all. The context filter uses
+`['drop', 'keep']`, with `keep` on the safer side of uncertainty. See
+[The decision core](decision-core.md) for why this boundary supports both
+consumers, what remains specific to subagent dispatch, and where coupling still
+exists.

@@ -394,7 +394,7 @@ switch (command) {
     if (policy.description) console.log(`${policy.description}\n`);
     console.log(`entry: ${policy.entry}   fallback tier: ${policy.fallbackTier}\n`);
     for (const node of policy.nodes.values()) {
-      const edge = (branch) => (node[branch].tier ? `tier ${node[branch].tier}` : `→ ${node[branch].goto}`);
+      const edge = (branch) => (node[branch].value ? `tier ${node[branch].value}` : `→ ${node[branch].goto}`);
       console.log(`${node.id}  [${node.type}${node.predicate ? ` ${node.predicate}` : ''}]`);
       if (node.question) console.log(`  ? ${node.question}`);
       console.log(`  yes: ${edge('yes')}`);
