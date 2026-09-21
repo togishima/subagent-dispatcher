@@ -107,15 +107,15 @@ injectable would be a third generalization, beyond parameterizing values and
 adding the second consumer. No use case yet forces it, so it is deliberately
 unsolved. Output values are generic; the available input predicates are not.
 
-`src/policy/compat.mjs` is a transitional adapter for callers passing the old
-`config` argument. It sorts `config.tiers` by `order` to produce `values`, uses
-the second value as the fallback (the first if there is only one), copies
-`routing.policyGraph.graph` and `routing.policyGraph.path`, and maps
-`$configDir` to `configDir`. Explicit options with `values` pass through.
-The import dependency on configuration is gone, but knowledge of its shape
-still lives under `src/policy/`. Once every caller passes explicit options,
-this adapter can be deleted. The `loadPolicy()` call above, taken from
-`test/context-filter.test.mjs`, is the migrated form.
+Every caller passes explicit `{ values, fallback, graph, path, configDir }`
+options. The routing application derives them from its configuration in
+`routingPolicyOptions()`, `src/router/tier-policy.mjs`: it sorts `config.tiers`
+by `order` to produce `values`, uses the second value as the fallback (the
+first if there is only one), and copies `routing.policyGraph.graph`,
+`routing.policyGraph.path` and `$configDir`. The CLI and the routing tests go
+through that function. Nothing under `src/policy/` knows the shape of the
+configuration any more; the `loadPolicy()` call above, taken from
+`test/context-filter.test.mjs`, shows the same options built by hand.
 
 Semantic engine settings still live under `config.routing.*`, including
 `routing.jev` and `routing.semanticEvaluator`. The evaluators themselves do not
