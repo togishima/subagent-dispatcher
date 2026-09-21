@@ -187,20 +187,33 @@ maps an id to a fact and takes precedence:
 ```
 
 **The key is not the `id:` from the rule file.** Semgrep prefixes it with the
-rules file's directory path relative to the scan directory, dot-separated:
+rules file's directory, taken relative to the scan directory, with the
+separators turned into dots and the leading dot of the result dropped. Measured
+against Semgrep 1.176:
 
 ```text
 --config rules.yml              →  auth-sensitive-change
---config .semgrep/rules.yml     →  semgrep.auth-sensitive-change
---config /elsewhere/rules.yml   →  elsewhere.auth-sensitive-change
+--config .semgrep/rules.yml     →  semgrep.auth-sensitive-change     (leading dot gone)
+--config plain/rules.yml        →  plain.auth-sensitive-change
+--config .a/.b/rules.yml        →  a..b.auth-sensitive-change        (only the first one)
+--config x.y/rules.yml          →  x.y.auth-sensitive-change         (indistinguishable
+                                                                      from a separator)
 ```
 
-So a `ruleFacts` entry written from the rule file alone silently never matches —
-it is not an error, just a fact that never appears. For the shipped default
-(`.semgrep/dispatcher.yml`, scanned from the repository root) the prefix is
-`semgrep.`, and it stays stable as long as the rules file stays put. Moving the
-file changes every key. Run `jev-dispatch facts` after adding a mapping and
-confirm the fact actually shows up.
+The last two are the reason not to compute this key by hand. The leading dot is
+dropped once, from the joined prefix, not from each segment; and a dot inside a
+directory name is not escaped, so the prefix cannot be parsed back into a path.
+
+The shipped default is a dot directory, so it is the case most likely to catch
+you: `.semgrep/dispatcher.yml` scanned from the repository root gives
+`semgrep.<id>`, **not** `.semgrep.<id>`.
+
+Getting this wrong is silent. A `ruleFacts` entry whose key does not match is
+not an error and produces no warning — the fact simply never appears, which is
+indistinguishable from a rule that did not fire. So do not derive the key:
+observe it. Run `jev-dispatch facts` on a file you know matches, confirm the
+fact shows up, and re-check after moving the rules file, which changes every
+key.
 
 That asymmetry is the real reason to prefer metadata: one mechanism carries a
 name you chose, the other carries a name Semgrep derives from a path. What is
