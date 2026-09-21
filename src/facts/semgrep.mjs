@@ -45,18 +45,26 @@ const isFactName = (value) => typeof value === 'string' && value.trim() !== '';
  *
  * Two sources, in order:
  *
- *   1. `facts.semgrep.ruleFacts` in configuration — an explicit rule-id → fact
- *      mapping, which works with any rule pack including ones you do not own.
+ *   1. `facts.semgrep.ruleFacts` in configuration — an explicit id → fact
+ *      mapping, for rules you cannot annotate.
  *   2. `metadata.dispatcher.fact` on the rule itself, which Semgrep echoes back
  *      under `extra.metadata`.
  *
- * Rule metadata is the nicer convention — the rule and the fact it means travel
- * together — but it only exists for rules you wrote, and the nesting has to
- * survive whatever Semgrep version is installed. So both are supported, config
- * wins, and neither is required: a match that maps to no fact is still counted
- * but contributes nothing to routing. What is deliberately *not* supported is a
+ * Metadata is the one to reach for. The rule and the fact it means travel
+ * together, and the name written in the rule is the name that arrives.
+ *
+ * `ruleFacts` is keyed on `check_id`, which is *not* the `id:` in the rule file:
+ * Semgrep prefixes it with the rules file's directory path relative to the scan
+ * directory (`.semgrep/rules.yml` → `semgrep.<id>`). A mapping written from the
+ * rule file alone therefore never matches, and never says so — which is why it
+ * is the fallback here rather than the recommended path. Matching on the raw id
+ * instead is not a fix: it would make two rules of the same name in different
+ * packs indistinguishable.
+ *
+ * Neither source is required: a match that maps to no fact is still counted but
+ * contributes nothing to routing. What is deliberately *not* supported is a
  * policy naming a Semgrep rule id directly, which would couple routing policy
- * to a rule pack's internal names.
+ * to a rule pack's internal names — and, given the above, to a file path.
  */
 function factsForResult(result, ruleFacts) {
   const ruleId = result?.check_id;

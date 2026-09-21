@@ -154,6 +154,28 @@ test('configured ruleFacts map rule ids a rule pack owner cannot annotate', asyn
   assert.deepEqual(result.facts, ['auth_sensitive', 'security_sensitive']);
 });
 
+test('ruleFacts is keyed on the check id Semgrep emits, not the rule file id', async () => {
+  // Semgrep prefixes the id with the rules file's directory relative to the scan
+  // directory, so `.semgrep/dispatcher.yml` yields `semgrep.<id>`. A mapping
+  // written from the rule file alone matches nothing and reports no error, which
+  // is the whole reason metadata is the recommended mechanism.
+  const emitted = semgrepJson([match('semgrep.auth-sensitive-change', undefined)]);
+
+  const fromRuleFile = await runSemgrep(
+    { cwd: root, ruleFacts: { 'auth-sensitive-change': 'auth_sensitive' } },
+    { spawn: fakeSpawn({ stdout: emitted }) },
+  );
+  assert.equal(fromRuleFile.status, FACT_STATUS.OK, 'a key that misses is not an error');
+  assert.deepEqual(fromRuleFile.facts, [], 'the bare rule id does not match the check id');
+  assert.equal(fromRuleFile.matchCount, 1, 'the match is still counted, it just names no fact');
+
+  const fromCheckId = await runSemgrep(
+    { cwd: root, ruleFacts: { 'semgrep.auth-sensitive-change': 'auth_sensitive' } },
+    { spawn: fakeSpawn({ stdout: emitted }) },
+  );
+  assert.deepEqual(fromCheckId.facts, ['auth_sensitive']);
+});
+
 test('config-supplied rule mapping wins over rule metadata', async () => {
   const result = await runSemgrep(
     { cwd: root, ruleFacts: { 'auth-sensitive-change': 'security_sensitive' } },

@@ -174,20 +174,37 @@ rules:
 
 which normalizes to `auth_sensitive` in `codeFacts.matched`.
 
-Rule metadata is the preferred convention: the rule and the fact it means travel
-together, so renaming a rule cannot silently break a policy. It only works for
-rules you own, though, and it depends on Semgrep echoing nested custom metadata
-back under `extra.metadata` — which current versions do, but which is not part of
-any stability promise. So `facts.semgrep.ruleFacts` is also supported and takes
-precedence:
+Use rule metadata wherever you can. The rule and the fact it means travel
+together, so renaming a rule cannot silently break a policy, and the name you
+write is the name that arrives — verified against Semgrep 1.176: the nested
+`dispatcher.fact` comes back intact under `extra.metadata`.
+
+For rules you cannot annotate — a pack you did not write — `facts.semgrep.ruleFacts`
+maps an id to a fact and takes precedence:
 
 ```json
-{ "ruleFacts": { "r2c.owasp.sql-injection": "security_sensitive" } }
+{ "ruleFacts": { "semgrep.auth-sensitive-change": "auth_sensitive" } }
 ```
 
-That covers rule packs you did not write and gives you an escape hatch if a
-Semgrep version stops carrying the metadata through. The tradeoff is that the
-mapping now lives away from the rule. What is deliberately not supported either
+**The key is not the `id:` from the rule file.** Semgrep prefixes it with the
+rules file's directory path relative to the scan directory, dot-separated:
+
+```text
+--config rules.yml              →  auth-sensitive-change
+--config .semgrep/rules.yml     →  semgrep.auth-sensitive-change
+--config /elsewhere/rules.yml   →  elsewhere.auth-sensitive-change
+```
+
+So a `ruleFacts` entry written from the rule file alone silently never matches —
+it is not an error, just a fact that never appears. For the shipped default
+(`.semgrep/dispatcher.yml`, scanned from the repository root) the prefix is
+`semgrep.`, and it stays stable as long as the rules file stays put. Moving the
+file changes every key. Run `jev-dispatch facts` after adding a mapping and
+confirm the fact actually shows up.
+
+That asymmetry is the real reason to prefer metadata: one mechanism carries a
+name you chose, the other carries a name Semgrep derives from a path. What is
+deliberately not supported either
 way is a policy naming a Semgrep rule id: policies name facts, so a rule pack can
 be swapped without touching routing.
 
