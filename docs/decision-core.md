@@ -48,10 +48,17 @@ routing column describes the shipped three-tier configuration and policies.
 | Policies | `policies/v1.json`, `policies/v2.json` | `policies/context-filter-v1.json` |
 
 Both use the same graph validation, deterministic predicate dispatch, safer
-branch handling and traversal. The context filter's source totals 48 lines:
-37 in `src/context-filter/index.mjs` and 11 in `src/context-filter/state.mjs`,
+branch handling and traversal. The context filter's source totals 55 lines:
+37 in `src/context-filter/index.mjs` and 18 in `src/context-filter/state.mjs`,
 including comments and blank lines. Its application work is to select the
 state sent to an injected evaluator and return the decision.
+
+That selection is an allowlist of `kind` and `summary`, so a field added to an
+item later cannot reach an evaluator by accident. The item's id is excluded
+along with its body: no predicate reads it, the policy's question names only
+kind and summary, and one call judges one item, so an id has no addressing role
+either. An id is frequently a file path, and the routing state beside it sends
+a count of relevant files rather than their names for the same reason.
 
 Adding that second consumer required no changes to the graph loader, traversal
 or router. It did add `item_kind_is` and `item_matches` to the shared predicate

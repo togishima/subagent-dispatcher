@@ -14,6 +14,8 @@ const policy = loadPolicy({
 });
 const task = 'Fix the login redirect';
 const item = { id: 'note-1', kind: 'note', summary: 'Login redirect details' };
+/** What an evaluator is allowed to see: the item's id is not part of it. */
+const sent = { kind: item.kind, summary: item.summary };
 
 function engineFor(probability = 0.95, extra = {}) {
   const engine = createMockEngine({ routing: { semanticEvaluator: {
@@ -55,7 +57,7 @@ for (const [probability, value] of [[0.95, 'keep'], [0.05, 'drop']]) {
     assert.equal(engine.evaluate.mock.callCount(), 1);
     const request = engine.evaluate.mock.calls[0].arguments[0];
     assert.deepEqual(request.predicates, semanticNodes(policy));
-    assert.deepEqual(request.state, { task, item });
+    assert.deepEqual(request.state, { task, item: sent });
     assert.equal(result.trail.at(-1).nodeId, 'item_relevant');
     assert.equal(result.trail.at(-1).uncertain, false);
   });
@@ -89,8 +91,8 @@ test('only summaries and selected metadata enter the state or engine request', a
     metadata: { content: 'SECRET_NESTED' },
   };
   const state = buildFilterState({ task, item: privateItem });
-  assert.deepEqual(state, { task, item });
-  for (const secret of ['SECRET_CONTENT', 'SECRET_BODY', 'SECRET_NESTED']) {
+  assert.deepEqual(state, { task, item: sent });
+  for (const secret of ['SECRET_CONTENT', 'SECRET_BODY', 'SECRET_NESTED', item.id]) {
     assert.equal(JSON.stringify(state).includes(secret), false);
   }
   const engine = engineFor();
