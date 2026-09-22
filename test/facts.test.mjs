@@ -10,6 +10,7 @@ import { PREDICATES, evaluateDeterministic } from '../src/policy/predicates.mjs'
 import { traverse } from '../src/policy/traverse.mjs';
 import { validatePolicy } from '../src/policy/graph.mjs';
 import { buildRoutingState } from '../src/router/state.mjs';
+import { routingPolicyOptions } from '../src/router/tier-policy.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { TelemetryStore } from '../src/telemetry/store.mjs';
 import { testConfig, tempDir } from './helpers.mjs';
@@ -268,7 +269,7 @@ test('a policy can route on a code fact, and routes as before without one', () =
       },
       { id: 'verifiable', type: 'deterministic', predicate: 'verification_available', yes: { tier: 'low' }, no: { tier: 'medium' } },
     ],
-  }, config);
+  }, routingPolicyOptions(config));
 
   const withFact = traverse(graph, { codeFacts: { matched: ['auth_sensitive'], status: 'ok' }, verificationAvailable: true }, {});
   assert.equal(withFact.tier, 'high');
@@ -329,7 +330,7 @@ test('traversal acquires no evidence: no I/O, no subprocess, synchronous', () =>
     entry: 'a',
     fallbackTier: 'medium',
     nodes: [{ id: 'a', type: 'deterministic', predicate: 'code_fact_present', args: { facts: ['x'] }, yes: { tier: 'high' }, no: { tier: 'low' } }],
-  }, config);
+  }, routingPolicyOptions(config));
   const walk = traverse(graph, { codeFacts: { matched: ['x'], status: 'ok' } }, {});
   assert.ok(!(walk instanceof Promise), 'traverse() must stay synchronous');
   assert.equal(walk.tier, 'high');

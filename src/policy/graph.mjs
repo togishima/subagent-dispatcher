@@ -3,7 +3,6 @@ import path from 'node:path';
 import { parseYaml } from '../util/yaml.mjs';
 import { pluginRoot } from '../util/paths.mjs';
 import { PREDICATES } from './predicates.mjs';
-import { policyOptions } from './compat.mjs';
 
 /**
  * A decision policy is a small decision graph held as data, not code. Each node
@@ -15,7 +14,7 @@ import { policyOptions } from './compat.mjs';
  */
 
 export function resolvePolicyPath(options) {
-  const { path: configured, configDir } = policyOptions(options);
+  const { path: configured, configDir } = options;
   if (path.isAbsolute(configured)) return configured;
   // Resolve relative to the user's config directory first, then the plugin.
   const candidates = [
@@ -26,7 +25,6 @@ export function resolvePolicyPath(options) {
 }
 
 export function loadPolicy(options) {
-  options = policyOptions(options);
   const inline = options.graph;
   if (inline) return validatePolicy(inline, options, '<inline>');
   const file = resolvePolicyPath(options);
@@ -46,7 +44,7 @@ const BRANCHES = ['yes', 'no'];
 
 export function validatePolicy(raw, options, source = '<inline>') {
   const problems = [];
-  const { values, fallback: defaultFallback } = policyOptions(options) ?? {};
+  const { values, fallback: defaultFallback } = options ?? {};
   if (!Array.isArray(values) || values.length === 0
       || values.some((value) => typeof value !== 'string' || value === '')
       || new Set(values).size !== values.length) {
