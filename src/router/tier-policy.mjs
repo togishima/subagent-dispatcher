@@ -34,3 +34,21 @@ export function resolveDispatch(config, routeDecision, attemptState = {}) {
     worker,
   };
 }
+
+/**
+ * The policy options the routing configuration implies. The tier ordering
+ * becomes the ordered values, the second tier (or the only one) the fallback,
+ * and the graph is wherever `routing.policyGraph` points. This is the one place
+ * the policy core's generic options are derived from routing configuration;
+ * the core itself only ever sees the result.
+ */
+export function routingPolicyOptions(config) {
+  const values = orderedTiers(config);
+  return {
+    values,
+    fallback: values[Math.min(1, values.length - 1)],
+    graph: config.routing.policyGraph.graph,
+    path: config.routing.policyGraph.path,
+    configDir: config.$configDir,
+  };
+}

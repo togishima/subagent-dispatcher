@@ -3,6 +3,7 @@ import { traverse, pathConfidence } from '../policy/traverse.mjs';
 import { buildRoutingState } from './state.mjs';
 import { classifyTierDirectly } from './jev-client.mjs';
 import { createEngine } from './engines/index.mjs';
+import { routingPolicyOptions } from './tier-policy.mjs';
 import { orderedTiers } from '../config/load.mjs';
 import { log } from '../util/log.mjs';
 
@@ -64,14 +65,7 @@ function decision(fields) {
 // ---------------------------------------------------------------- policy-graph
 
 registerRouter('policy-graph', (config) => {
-  const values = orderedTiers(config);
-  const policy = loadPolicy({
-    values,
-    fallback: values[Math.min(1, values.length - 1)],
-    graph: config.routing.policyGraph.graph,
-    path: config.routing.policyGraph.path,
-    configDir: config.$configDir,
-  });
+  const policy = loadPolicy(routingPolicyOptions(config));
   const semantic = semanticNodes(policy);
   const options = config.routing.policyGraph;
   // The graph does not know which engine answers its questions, and must not:

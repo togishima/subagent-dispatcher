@@ -6,6 +6,7 @@ import { openStore } from '../src/telemetry/store.mjs';
 import { createTelemetryServer } from '../src/telemetry/server.mjs';
 import { createRouter } from '../src/router/index.mjs';
 import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
+import { routingPolicyOptions } from '../src/router/tier-policy.mjs';
 import { predicateNames } from '../src/policy/predicates.mjs';
 import { applicableChecks } from '../src/verify/index.mjs';
 import { collectFacts, FACT_STATUS } from '../src/facts/index.mjs';
@@ -89,7 +90,7 @@ async function doctor() {
   console.log('\nrouting policy');
   if (config.routing.mode === 'policy-graph') {
     try {
-      const policy = loadPolicy(config);
+      const policy = loadPolicy(routingPolicyOptions(config));
       ok(`policy ${policy.version}`, `${policy.nodes.size} nodes, ${semanticNodes(policy).length} semantic`);
     } catch (error) {
       bad('policy graph', error.message.split('\n')[0]);
@@ -389,7 +390,7 @@ switch (command) {
     }
     break;
   case 'policy': {
-    const policy = loadPolicy(config);
+    const policy = loadPolicy(routingPolicyOptions(config));
     console.log(`${policy.version}  (${policy.source})`);
     if (policy.description) console.log(`${policy.description}\n`);
     console.log(`entry: ${policy.entry}   fallback tier: ${policy.fallbackTier}\n`);
