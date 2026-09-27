@@ -5,6 +5,9 @@ import { openStore } from '../telemetry/store.mjs';
 import { Dispatcher } from '../dispatch/orchestrate.mjs';
 import { overview } from '../telemetry/queries.mjs';
 import { log } from '../util/log.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pluginRoot } from '../util/paths.mjs';
 
 /**
  * The delegation boundary.
@@ -133,7 +136,7 @@ const statusTool = {
 
 createServer({
   name: 'jev-dispatch',
-  version: '0.3.0',
+  version: JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8')).version,
   tools: [delegateTool, statusTool],
   onError: (error) => log.error('mcp tool error', { error: error.message, stack: error.stack?.split('\n')[1] }),
 });

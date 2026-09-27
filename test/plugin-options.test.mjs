@@ -6,7 +6,9 @@ import { resolveProvider, PROVIDERS } from '../src/router/providers.mjs';
 import { workerEnv } from '../src/worker/run.mjs';
 import { workerForTier, loadConfig } from '../src/config/load.mjs';
 import { selectedEngineName } from '../src/router/engines/index.mjs';
-import { testConfig } from './helpers.mjs';
+import path from 'node:path';
+import { testConfig, tempDir } from './helpers.mjs';
+import { resolvePolicyPath } from '../src/policy/graph.mjs';
 
 /** Set CLAUDE_PLUGIN_OPTION_* for the duration of one test. */
 function withOptions(options, fn) {
@@ -171,5 +173,27 @@ test('every provider key variable is still stripped from a worker', () => {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
+  }
+});
+
+test('install answers do not move where a config file\'s relative paths resolve', () => {
+  const dir = tempDir();
+  fs.mkdirSync(path.join(dir, 'policies'));
+  fs.writeFileSync(path.join(dir, 'policies', 'mine.json'), '{}');
+  const file = path.join(dir, 'config.json');
+  fs.writeFileSync(file, JSON.stringify({ routing: { policyGraph: { path: 'policies/mine.json' } } }));
+  const previous = process.env.JEV_DISPATCH_CONFIG;
+  process.env.JEV_DISPATCH_CONFIG = file;
+  try {
+    withOptions({ jev_provider: 'cloudflare', jev_account_id: 'acct-1' }, () => {
+      const config = loadConfig({ reload: true });
+      assert.equal(config.$sources[0], 'plugin install options');
+      assert.equal(config.$configDir, dir);
+      assert.equal(resolvePolicyPath({ path: config.routing.policyGraph.path, configDir: config.$configDir }),
+        path.join(dir, 'policies', 'mine.json'));
+    });
+  } finally {
+    process.env.JEV_DISPATCH_CONFIG = previous;
+    loadConfig({ reload: true });
   }
 });

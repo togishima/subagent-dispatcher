@@ -250,6 +250,7 @@ export function loadConfig({ reload = false } = {}) {
   // file written later still overrides them.
   let merged = base;
   const sources = [];
+  let configFile = null;
   const fromInstall = pluginOptionOverrides();
   if (Object.keys(fromInstall).length > 0) {
     merged = deepMerge(merged, fromInstall);
@@ -260,6 +261,7 @@ export function loadConfig({ reload = false } = {}) {
     try {
       merged = deepMerge(merged, readConfigFile(candidate));
       sources.push(candidate);
+      configFile = candidate;
     } catch (error) {
       throw new Error(`failed to read config ${candidate}: ${error.message}`);
     }
@@ -278,7 +280,10 @@ export function loadConfig({ reload = false } = {}) {
   merged.routing = normalizeRouting(merged.routing);
   const config = validate(merged);
   config.$sources = sources;
-  config.$configDir = sources.length > 0 && !sources[0].startsWith('env:') ? path.dirname(sources[0]) : null;
+  // Only a config file has a directory; install options and env overrides are
+  // also sources, and taking dirname() of their labels would resolve relative
+  // paths against the process's cwd instead.
+  config.$configDir = configFile ? path.dirname(configFile) : null;
   log.debug('config loaded', { sources, mode: config.routing.mode });
   cached = config;
   return config;
