@@ -48,6 +48,11 @@ const delegateTool = {
         type: 'string',
         description: 'A short summary of only what the worker needs to know. Not the conversation.',
       },
+      cwd: {
+        type: 'string',
+        description:
+          'Absolute path of the directory the subtask works in — the repository root, normally. Defaults to the directory this session was started in; set it whenever the work is in a different repository, or verification runs in the wrong place.',
+      },
       plan: {
         type: 'string',
         description:
