@@ -7,6 +7,8 @@ import { normalizeRequest, specificationSignals } from './request.mjs';
 import { collectFacts } from '../facts/index.mjs';
 import { newId } from '../util/ids.mjs';
 import { log } from '../util/log.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
 
 /**
  * The delegation loop: route, run, verify, and escalate under a fixed budget.
@@ -30,7 +32,7 @@ export class Dispatcher {
   async delegate(request) {
     const taskId = request.taskId ?? newId();
     const sessionId = request.sessionId ?? process.env.CLAUDE_CODE_SESSION_ID ?? null;
-    const cwd = request.cwd ?? process.cwd();
+    const cwd = resolveCwd(request.cwd);
 
     const task = normalizeRequest(request, cwd);
 
@@ -264,4 +266,17 @@ export function specificationHint({ specification, attempts, status, planProblem
   }
 
   return notes.length > 0 ? notes.join(' ') : null;
+}
+
+// The server's own directory is wherever the session was started, which need
+// not be the repository the work is in. A worker and its checks running in the
+// wrong directory fail for reasons unrelated to the work, so a directory that
+// does not exist is refused before anything is routed.
+function resolveCwd(requested) {
+  if (requested === undefined || requested === null || requested === '') return process.cwd();
+  const resolved = path.resolve(process.cwd(), String(requested));
+  if (!fs.statSync(resolved, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(`cwd is not a directory: ${resolved}`);
+  }
+  return resolved;
 }

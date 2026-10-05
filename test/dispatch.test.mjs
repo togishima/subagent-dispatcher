@@ -208,6 +208,42 @@ test('a failing cheap worker escalates to the next tier and stops when it passes
   store.close();
 });
 
+test('the work runs where cwd says, not where the server was started', async () => {
+  const dir = tempDir();
+  const { config, successFile } = escalationConfig(dir);
+  fs.writeFileSync(
+    path.join(dir, 'low.js'),
+    `#!/usr/bin/env node\nrequire('fs').writeFileSync(require('path').join(process.cwd(),${JSON.stringify(path.basename(successFile))}),'ok');` +
+      `process.stdout.write(JSON.stringify({status:"completed",summary:"fixed it",evidence:["did the thing"]}));\n`,
+  );
+  fs.chmodSync(path.join(dir, 'low.js'), 0o755);
+  // Relative, so the check passes only if it too runs in the requested directory.
+  config.verification.checks[0].command = `test -f ${path.basename(successFile)}`;
+
+  const store = new TelemetryStore(config, path.join(dir, 'telemetry.db'));
+  const relative = path.relative(process.cwd(), dir);
+  const result = await new Dispatcher(config, store).delegate({ task: 'do the thing', cwd: relative });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.attempts, 1);
+  assert.ok(fs.existsSync(successFile));
+  store.close();
+});
+
+test('a cwd that is not a directory is refused before anything is routed', async () => {
+  const dir = tempDir();
+  const { config } = escalationConfig(dir);
+  const store = new TelemetryStore(config, path.join(dir, 'telemetry.db'));
+  const missing = path.join(dir, 'no-such-repo');
+
+  await assert.rejects(
+    new Dispatcher(config, store).delegate({ task: 'do the thing', cwd: missing }),
+    { message: `cwd is not a directory: ${missing}` },
+  );
+  assert.equal(store.queryOne('SELECT COUNT(*) AS n FROM delegations').n, 0);
+  store.close();
+});
+
 test('the retry budget is finite even when every tier fails', async () => {
   const dir = tempDir();
   const { config } = escalationConfig(dir, { mediumSucceeds: false });

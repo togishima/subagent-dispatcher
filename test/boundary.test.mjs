@@ -54,7 +54,7 @@ test('the main session is offered no way to choose a model, worker or tier', asy
 
   // The whole contract: no capability knob exists to turn.
   assert.deepEqual(parameters.sort(), [
-    'acceptanceCriteria', 'constraints', 'context', 'contextFiles', 'expectedOutput',
+    'acceptanceCriteria', 'constraints', 'context', 'contextFiles', 'cwd', 'expectedOutput',
     'plan', 'planFiles', 'referenceFiles', 'riskFlags', 'task', 'taskType', 'verification',
   ]);
   assert.equal(delegate.inputSchema.additionalProperties, false);
