@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import { loadPolicy, validatePolicy, semanticNodes } from '../src/policy/graph.mjs';
 import { traverse, pathConfidence } from '../src/policy/traverse.mjs';
 import { PREDICATES, evaluateDeterministic } from '../src/policy/predicates.mjs';
+import { routingPolicyOptions } from '../src/router/tier-policy.mjs';
 import { testConfig } from './helpers.mjs';
 
 const config = testConfig();
+const TIER_OPTIONS = routingPolicyOptions(config);
 const answer = (result, confidence) => ({
   result,
   confidence,
@@ -25,7 +27,7 @@ const GRAPH = {
 };
 
 test('the shipped policy loads and is internally consistent', () => {
-  const policy = loadPolicy(config);
+  const policy = loadPolicy(TIER_OPTIONS);
   assert.equal(policy.version, 'v2');
   assert.ok(policy.nodes.size >= 4);
   assert.ok(semanticNodes(policy).length >= 1);
@@ -36,13 +38,13 @@ test('the shipped policy loads and is internally consistent', () => {
 
 test('every shipped policy version validates, so v1 stays runnable for comparison', () => {
   for (const version of ['v1', 'v2']) {
-    const policy = loadPolicy(testConfig({ routing: { policyGraph: { path: `policies/${version}.json` } } }));
+    const policy = loadPolicy(routingPolicyOptions(testConfig({ routing: { policyGraph: { path: `policies/${version}.json` } } })));
     assert.equal(policy.version, version);
   }
 });
 
 test('v2 routes a complete brief cheaply and a bare goal expensively', () => {
-  const policy = loadPolicy(config);
+  const policy = loadPolicy(TIER_OPTIONS);
   const options = config.routing.policyGraph;
   const brief = {
     task: 'implement the thing',
@@ -72,7 +74,7 @@ test('v2 routes a complete brief cheaply and a bare goal expensively', () => {
 });
 
 test('v2 accepts acceptance criteria in place of a runnable check', () => {
-  const policy = loadPolicy(config);
+  const policy = loadPolicy(TIER_OPTIONS);
   const options = config.routing.policyGraph;
   const base = { task: 'x', verificationAvailable: false, specification: { hasPlan: true, hasEditSites: true, hasAcceptanceCriteria: true } };
   // Nothing to run, but the worker can still check itself against stated criteria.
@@ -87,7 +89,7 @@ test('v2 accepts acceptance criteria in place of a runnable check', () => {
 });
 
 test('a brief missing its definition of done is not treated as complete', () => {
-  const policy = loadPolicy(config);
+  const policy = loadPolicy(TIER_OPTIONS);
   const options = config.routing.policyGraph;
   // No acceptance criteria and no expected output: the caller left something open,
   // so routing falls through to the judgement questions rather than to execution.
@@ -102,7 +104,7 @@ test('a brief missing its definition of done is not treated as complete', () => 
 });
 
 test('the safer branch is derived from reachable tiers when not declared', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   // c's yes-branch reaches high, its no-branch reaches medium, so yes over-routes.
   assert.equal(policy.nodes.get('c').$safer, 'yes');
   assert.equal(policy.nodes.get('c').$saferSource, 'derived');
@@ -121,7 +123,7 @@ test('a policy whose branches are indistinguishable is refused at load time', ()
           entry: 'a',
           nodes: [{ id: 'a', type: 'semantic', question: 'q?', yes: { tier: 'medium' }, no: { tier: 'medium' } }],
         },
-        config,
+        TIER_OPTIONS,
       ),
     /set "onUncertain" explicitly/,
   );
@@ -139,11 +141,11 @@ test('structural errors are caught before any task is routed', () => {
         { id: 'orphan', type: 'semantic', question: 'q', yes: { tier: 'low' }, no: { tier: 'high' } },
       ] }, /unreachable/],
   ];
-  for (const [graph, pattern] of cases) assert.throws(() => validatePolicy(graph, config), pattern);
+  for (const [graph, pattern] of cases) assert.throws(() => validatePolicy(graph, TIER_OPTIONS), pattern);
 });
 
 test('traversal follows confident answers', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   const options = { defaultMinConfidence: 0.6, overRouteOnUncertain: true };
 
   assert.equal(traverse(policy, { verificationAvailable: true }, { a: answer('yes', 0.95) }, options).tier, 'low');
@@ -155,7 +157,7 @@ test('traversal follows confident answers', () => {
 });
 
 test('uncertainty over-routes instead of under-routing', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   const options = { defaultMinConfidence: 0.6, overRouteOnUncertain: true };
   // Jev says "yes" (which would reach low), but only just — so the safer "no" wins.
   const walk = traverse(policy, { verificationAvailable: true }, { a: answer('yes', 0.52), c: answer('no', 0.9) }, options);
@@ -168,7 +170,7 @@ test('uncertainty over-routes instead of under-routing', () => {
 });
 
 test('turning off over-routing honours the raw answer', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   const walk = traverse(policy, { verificationAvailable: true }, { a: answer('yes', 0.52) }, {
     defaultMinConfidence: 0.6,
     overRouteOnUncertain: false,
@@ -179,7 +181,7 @@ test('turning off over-routing honours the raw answer', () => {
 });
 
 test('a missing semantic answer takes the safer branch', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   const walk = traverse(policy, { verificationAvailable: true }, {}, { defaultMinConfidence: 0.6 });
   assert.equal(walk.tier, 'high'); // a -> no (safer), c -> yes (safer)
   assert.ok(walk.trail.every((step) => step.type !== 'semantic' || step.uncertain));
@@ -187,7 +189,7 @@ test('a missing semantic answer takes the safer branch', () => {
 });
 
 test('path confidence is the weakest link that decided the route', () => {
-  const policy = validatePolicy(GRAPH, config);
+  const policy = validatePolicy(GRAPH, TIER_OPTIONS);
   const walk = traverse(policy, {}, { a: answer('no', 0.91), c: answer('yes', 0.73) }, { defaultMinConfidence: 0.6 });
   assert.equal(pathConfidence(walk.trail), 0.73);
 });
@@ -340,21 +342,22 @@ test('conflicting value and tier aliases and undefined terminal values are rejec
   }
 });
 
-test('explicit loadPolicy options match the defaults from legacy config arguments', () => {
+test('routingPolicyOptions derives the generic policy options from routing configuration', () => {
   const inline = loadPolicy({ ...VALUE_OPTIONS, graph: VALUE_GRAPH });
   assert.equal(traverse(inline, {}, {}).value, 'keep');
   for (const version of ['v1', 'v2']) {
     const path = `policies/${version}.json`;
     const explicit = loadPolicy({ values: ['low', 'medium', 'high'], fallback: 'medium', path });
-    const legacy = loadPolicy(testConfig({ routing: { policyGraph: { path } } }));
-    assert.deepEqual(explicit, legacy);
+    const derived = loadPolicy(routingPolicyOptions(testConfig({ routing: { policyGraph: { path } } })));
+    assert.deepEqual(explicit, derived);
   }
   const raw = { version: 'default', nodes: [{
     id: 'a', type: 'semantic', question: 'Does the condition hold?',
     yes: { tier: 'low' }, no: { tier: 'high' },
   }] };
-  assert.equal(validatePolicy(raw, config).fallback, 'medium');
-  const single = { ...config, tiers: { low: config.tiers.low } };
+  assert.equal(validatePolicy(raw, TIER_OPTIONS).fallback, 'medium');
+  const single = routingPolicyOptions({ ...config, tiers: { low: config.tiers.low } });
+  assert.deepEqual(single.values, ['low']);
   const singleGraph = { ...raw, nodes: [{ ...raw.nodes[0], onUncertain: 'yes', no: { tier: 'low' } }] };
   assert.equal(validatePolicy(singleGraph, single).fallback, 'low');
 });

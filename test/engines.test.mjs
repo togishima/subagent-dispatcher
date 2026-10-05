@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createEngine, engineNames, normalizeAnswer, normalizeResult, EvaluatorError } from '../src/router/engines/index.mjs';
 import { createRouter } from '../src/router/index.mjs';
 import { loadPolicy, semanticNodes } from '../src/policy/graph.mjs';
+import { routingPolicyOptions } from '../src/router/tier-policy.mjs';
 import { traverse } from '../src/policy/traverse.mjs';
 import { testConfig } from './helpers.mjs';
 
@@ -95,7 +96,7 @@ test('the same answers reach the same tier whichever engine supplied them', asyn
   const input = { task: 'rework the session layer', attempt: 1, verificationAvailable: true, specification: { hasPlan: false } };
   const viaEngine = await router.route(input);
 
-  const policy = loadPolicy(config);
+  const policy = loadPolicy(routingPolicyOptions(config));
   const direct = {};
   for (const node of semanticNodes(policy)) {
     const p = probabilities[node.id];
