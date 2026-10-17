@@ -1,6 +1,6 @@
 {
   "name": "jev-dispatch",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "Jev-powered subagent scheduler experiment platform for Claude Code",
   "license": "MIT",
